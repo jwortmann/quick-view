@@ -1,0 +1,10 @@
+[
+    {
+        "caption": "Preferences: QuickView Settings",
+        "command": "edit_settings",
+        "args": {
+            "base_file": "${packages}/QuickView/QuickView.sublime-settings",
+            "default": "{\n\t$0\n}\n"
+        }
+    }
+]
