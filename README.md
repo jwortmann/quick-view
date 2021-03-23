@@ -6,7 +6,7 @@
 
 This package for Sublime Text provides the hover preview popups for images and CSS colors from Adobe Brackets.
 
-The design of the hover popups is intended to reproduce the style of the Quick View feature from Brackets, but it uses adaptive colors dependent on the color scheme and the plugin logic was written from scratch.
+The design of the hover popups is intended to reproduce the style of the Quick View feature from Brackets, but it uses adaptive colors based on the color scheme and the plugin logic was written from scratch.
 
 Also try out my [Brackets Color Scheme](https://github.com/jwortmann/brackets-color-scheme) package for Sublime Text if you like.
 
