@@ -6,7 +6,7 @@
     "image_preview": true,
 
     // Scope selector to define applicable regions where image previews should be enabled
-    "image_scope_selector": "meta.tag.inline meta.attribute-with-value string | markup.underline.link.image.markdown | meta.property-value.css meta.function-call string",
+    "image_scope_selector": "meta.tag meta.attribute-with-value string | markup.underline.link.image.markdown | meta.property-value.css meta.function-call string",
 
     // Whether or not to try and show image previews for URLs missing extensions
     // (e.g., https://avatars.githubusercontent.com/u/684879?s=200&v=4)
