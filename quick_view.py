@@ -272,7 +272,9 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
         'LESS.sublime-syntax',
         'Sass.sublime-syntax',
         'SCSS.sublime-syntax',
-        'Stylus.tmLanguage'
+        'Stylus.tmLanguage',
+        'Sublime Text Color Scheme.sublime-syntax',
+        'Sublime Text Theme.sublime-syntax'
     ]
     active_region = None
 
@@ -313,7 +315,7 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
             region.a = region.a - 1
             r, g, b, a = hex2rgba(self.view.substr(region))
             self.rgba_color_swatch(region, r, g, b, a)
-        elif self.view.match_selector(point, 'support.function.color | meta.property-value meta.function-call meta.group'):
+        elif self.view.match_selector(point, 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'):
             line = self.view.line(point)
             text = self.view.substr(line)
             # @see https://facelessuser.github.io/coloraide/color/#color-matching
