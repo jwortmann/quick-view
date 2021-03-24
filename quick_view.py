@@ -400,10 +400,10 @@ class ImageHoverListener(sublime_plugin.EventListener):
             data = b64decode(data_base64)
             width, height = image_size(data)
             self.create_image_popup(view, region, width, height, url)
-        elif url.startswith(SUPPORTED_PROTOCOLS):
-            if url.endswith(SUPPORTED_FILE_EXTENSIONS) or settings.get('extensionless_image_preview'):
+        elif url.lower().startswith(SUPPORTED_PROTOCOLS):
+            if url.lower().endswith(SUPPORTED_FILE_EXTENSIONS) or settings.get('extensionless_image_preview'):
                 sublime.set_timeout_async(lambda: self.request_img_create_popup(url, view, region))
-        elif url.endswith(SUPPORTED_FILE_EXTENSIONS):
+        elif url.lower().endswith(SUPPORTED_FILE_EXTENSIONS):
             file_name = view.file_name()
             if not file_name:
                 return
