@@ -21,7 +21,7 @@ MAX_POPUP_IMAGE_WIDTH = 200
 
 SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
 SUPPORTED_MIME_TYPES = ('image/bmp', 'image/gif', 'image/jpeg', 'image/png')
-SUPPORTED_FILE_EXTENSIONS = ('bmp', 'gif', 'jpg', 'jpeg', 'png')  # @todo Add support for svg and webp images if possible without binary dependency
+ST_NATIVE_FORMATS = ('.bmp', '.gif', '.jpg', '.jpeg', '.png')  # @todo Add support for svg and webp images if possible without binary dependency
 
 COLOR_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
 
@@ -90,7 +90,7 @@ quickview_template = '''
 
 data_template = 'data:{};base64,{}'
 
-def debug(*msg: str) -> None:
+def debug(*msg) -> None:
     if sublime.load_settings(SETTINGS_FILE).get('debug', False):
         print('QuickView:', *msg)
 
@@ -116,10 +116,10 @@ def hex2hsl(color: str) -> tuple:
     maxval = max(r, g, b)
     minval = min(r, g, b)
     c = maxval - minval
+    h = 0
+    s = 0
     l = (maxval + minval) / 2
-    if c == 0:
-        h = s = 0
-    else:
+    if c != 0:
         if maxval == r:
             h = (g - b) / c % 6
         elif maxval == g:
@@ -135,18 +135,18 @@ def base64png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> str:
     pixels = list()
     row_type1 = list()
     row_type2 = list()
-    for blocks in range(4):
+    for _ in range(4):
         row_type1.extend([r2, g2, b2] * 5)
         row_type1.extend([r1, g1, b1] * 5)
-    for blocks in range(4):
+    for _ in range(4):
         row_type2.extend([r1, g1, b1] * 5)
         row_type2.extend([r2, g2, b2] * 5)
     row_type1 = tuple(row_type1)
     row_type2 = tuple(row_type2)
-    for blocks in range(4):
-        for row in range(5):
+    for _ in range(4):
+        for _ in range(5):
             pixels.append(row_type1)
-        for row in range(5):
+        for _ in range(5):
             pixels.append(row_type2)
     data = io.BytesIO()
     png.Writer(width=40, height=40, greyscale=False).write(data, pixels)
@@ -154,6 +154,12 @@ def base64png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> str:
     return b64encode(data.getvalue()).decode('ascii')
 
 def popup_location(view: sublime.View, region: sublime.Region, popup_width: int) -> int:
+    """
+    calculate popup location such that:
+    - the popup points the region
+    - the popup is fully contained within the view and doesn't overlap with the window border, unless this contradicts with the previous rule
+    - the popup points to the center of the region, unless this contradicts with the previous rule
+    """
     ax, ay = view.text_to_layout(region.a)
     bx, _ = view.text_to_layout(region.b)
     vx = view.viewport_position()[0] + view.viewport_extent()[0] - popup_width  # maximum x-pos so that the popup is still contained within the window
@@ -168,14 +174,13 @@ def popup_location(view: sublime.View, region: sublime.Region, popup_width: int)
         horizontal_correction = 1  # shift 1 character to the right to ensure that the popup doesn't point to the left side of potential string punctuation
     return view.layout_to_text((x, ay)) + horizontal_correction
 
-def scale_image(width: int, height: int, em_width: float) -> tuple:
+def scale_image(width: int, height: int, device_scale_factor: float) -> tuple:
     """
     scale image such that:
     - aspect ratio gets preserved
     - resulting image width is at least MIN_POPUP_IMAGE_WIDTH
     - none of resulting image width and height is larger than MAX_POPUP_IMAGE_WIDTH, unless this contradicts with the previous rule
     """
-    device_scale_factor = EM_SCALE_FACTOR * em_width
     if width == -1 or height == -1:  # assume 16:9 aspect ratio
         return int(MAX_POPUP_IMAGE_WIDTH * device_scale_factor), int(9/16 * MAX_POPUP_IMAGE_WIDTH * device_scale_factor)
     image_scale_factor = min(MAX_POPUP_IMAGE_WIDTH / max(width, height), 1)
@@ -207,7 +212,7 @@ def request_img(url: str) -> tuple:
             if mime not in SUPPORTED_MIME_TYPES:
                 raise ValueError('mime type ' + mime + ' is no image or not supported')
             elif length > max_payload_size * 1024:
-                raise ValueError('refusing to download files larger than ' + str(max_payload_size) + ' kB')
+                raise ValueError('refusing to download files larger than ' + str(max_payload_size) + 'kB')
             data = response.read()
             width, height = image_size(data)
             data_base64 = b64encode(data).decode('ascii')
@@ -247,7 +252,7 @@ def image_size(data) -> tuple:
         elif size >= 16 and head.startswith(b'\211PNG\r\n\032\n'):
             width, height = struct.unpack('>LL', head[8:16])
         # GIF
-        elif size >= 10 and head[:6] in (b'GIF87a', b'GIF89a'):
+        elif size >= 10 and head.startswith((b'GIF87a', b'GIF89a')):
             width, height = struct.unpack('<HH', head[6:10])
         # BMP
         elif size >= 26 and head.startswith(b'BM'):
@@ -276,6 +281,8 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
         'Sublime Text Color Scheme.sublime-syntax',
         'Sublime Text Theme.sublime-syntax'
     ]
+    BACKGROUND_WHITE_PIXEL = {'light': 255, 'dark': 51}
+    BACKGROUND_BLACK_PIXEL = {'light': 204, 'dark': 0}
     active_region = None
 
     @classmethod
@@ -320,11 +327,11 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
             text = self.view.substr(line)
             # @see https://facelessuser.github.io/coloraide/color/#color-matching
             for m in COLOR_PATTERN.finditer(text):
-                if line.a + m.start() <= point <= line.a + m.end():
+                if m.start() <= point - line.a <= m.end():
                     mcolor = Color.match(text, start=m.start())
                     if mcolor is not None:
-                        region = sublime.Region(line.a + mcolor.start, line.a + mcolor.end)
-                        mcolor.color.convert('srgb', in_place=True)
+                        region = sublime.Region(line.a + mcolor.start, line.a + mcolor.end)  # type: ignore
+                        mcolor.color.convert('srgb', in_place=True)  # type: ignore
                         r = int(255 * mcolor.color.red)
                         g = int(255 * mcolor.color.green)
                         b = int(255 * mcolor.color.blue)
@@ -335,6 +342,7 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
     def rgb_color_swatch(self, region: sublime.Region) -> None:
         popup_border_width = sublime.load_settings(SETTINGS_FILE).get("popup_border_width")
         popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * self.view.em_width())
+        # popup_height = int((40 + 2 * popup_border_width + 9) * EM_SCALE_FACTOR * self.view.em_width())
         location = popup_location(self.view, region, popup_width)
         color_swatch = '<div class="color-swatch" style="background-color: {}"></div>'.format(self.view.substr(region))
         content = format_template(self.view, popup_width, color_swatch)
@@ -346,20 +354,17 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
             self.rgb_color_swatch(region)
             return
         _, _, lightness = hex2hsl(self.view.style()['background'])
-        if lightness < 0.5:  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
-            light_pixel = 51 * (1 - a)
-            dark_pixel = 0
-        else:
-            light_pixel = 255 * (1 - a)
-            dark_pixel = 204 * (1 - a)
-        # @todo Maybe calculate pixel background colors based on actual (popup) background lightness instead of color scheme class?
-        r1, g1, b1 = int(r * a + light_pixel), int(g * a + light_pixel), int(b * a + light_pixel)
-        r2, g2, b2 = int(r * a + dark_pixel), int(g * a + dark_pixel), int(b * a + dark_pixel)
+        color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
+        bg_white = self.BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
+        bg_black = self.BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
+        r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
+        r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
         data_base64 = base64png(r1, g1, b1, r2, g2, b2)
         device_scale_factor = EM_SCALE_FACTOR * self.view.em_width()
         scaled_width = int(40 * device_scale_factor)
         popup_border_width = sublime.load_settings(SETTINGS_FILE).get("popup_border_width")
         popup_width = int((40 + 2 * popup_border_width) * device_scale_factor)
+        # popup_height = int((40 + 2 * popup_border_width + 9) * device_scale_factor)
         location = popup_location(self.view, region, popup_width)
         color_swatch = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
         content = format_template(self.view, popup_width, color_swatch)
@@ -401,9 +406,9 @@ class ImageHoverListener(sublime_plugin.EventListener):
             width, height = image_size(data)
             self.create_image_popup(view, region, width, height, url)
         elif url.lower().startswith(SUPPORTED_PROTOCOLS):
-            if url.lower().endswith(SUPPORTED_FILE_EXTENSIONS) or settings.get('extensionless_image_preview'):
+            if url.lower().endswith(ST_NATIVE_FORMATS) or settings.get('extensionless_image_preview'):
                 sublime.set_timeout_async(lambda: self.request_img_create_popup(url, view, region))
-        elif url.lower().endswith(SUPPORTED_FILE_EXTENSIONS):
+        elif url.lower().endswith(ST_NATIVE_FORMATS):
             file_name = view.file_name()
             if not file_name:
                 return
@@ -423,13 +428,14 @@ class ImageHoverListener(sublime_plugin.EventListener):
             self.create_image_popup(view, region, width, height, src)
 
     def create_image_popup(self, view: sublime.View, region: sublime.Region, width: int, height: int, src: str) -> None:
-        em_width = view.em_width()
-        scaled_width, scaled_height = scale_image(width, height, em_width)
+        device_scale_factor = EM_SCALE_FACTOR * view.em_width()
+        scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
         popup_border_width = sublime.load_settings(SETTINGS_FILE).get("popup_border_width")
-        popup_width = scaled_width + int(2 * popup_border_width * EM_SCALE_FACTOR * em_width)
+        popup_width = scaled_width + int(2 * popup_border_width * device_scale_factor)
+        # popup_height = scaled_height + int((2 * popup_border_width + 9) * device_scale_factor)
         label = image_size_label(width, height)
-        img_preview = '<img class="img-preview" src="{}" width="{}" height="{}" /><div class="img-size">{}</div>'.format(src, scaled_width, scaled_height, label)
         location = popup_location(view, region, popup_width)
+        img_preview = '<img class="img-preview" src="{}" width="{}" height="{}" /><div class="img-size">{}</div>'.format(src, scaled_width, scaled_height, label)
         content = format_template(view, popup_width, img_preview)
         self.active_region = region
         view.show_popup(content, flags, location, 1024, 1024, None, self.reset_active_region)
