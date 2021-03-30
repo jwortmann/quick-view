@@ -4,6 +4,7 @@ import re
 import struct
 import sublime
 import sublime_plugin
+import subprocess
 import urllib.request
 
 from base64 import b64encode, b64decode
@@ -410,7 +411,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
                 sublime.set_timeout_async(lambda: self.request_img_create_popup(url, view, region))
         elif url.lower().endswith(ST_NATIVE_FORMATS):
             file_name = view.file_name()
-            if not file_name:
+            if not file_name:  # @todo Don't return if url is an absolute path
                 return
             local_path = os.path.abspath(os.path.join(os.path.dirname(file_name), url))
             if not os.path.exists(local_path):
@@ -420,6 +421,26 @@ class ImageHoverListener(sublime_plugin.EventListener):
                 width, height = image_size(data)
             src = 'file://' + local_path
             self.create_image_popup(view, region, width, height, src)
+        elif url.lower().endswith('.svg'):  # @todo Add support for internet urls (with url cache)
+            svg_converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')  # @todo Add to settings
+            if not svg_converter:
+                return
+            file_name = view.file_name()
+            if not file_name:  # @todo Don't return if url is an absolute path
+                return
+            local_path = os.path.abspath(os.path.join(os.path.dirname(file_name), url))
+            if not os.path.exists(local_path):
+                return
+            debug('loading image from', local_path)
+            if svg_converter == 'inkscape':
+                debug('using inkscape to convert svg')
+                sublime.set_timeout_async(lambda: self.convert_svg_create_popup(local_path, view, region))
+            elif svg_converter == 'cairo':
+                raise ValueError('cairo not yet supported')
+            elif svg_converter == 'magick':
+                raise ValueError('magick not yet supported')
+            else:
+                raise ValueError('unsupported converter: {}'.format(svg_converter))
 
     def request_img_create_popup(self, url: str, view: sublime.View, region: sublime.Region) -> None:
         mime, data_base64, width, height = request_img(url)
@@ -427,10 +448,20 @@ class ImageHoverListener(sublime_plugin.EventListener):
             src = data_template.format(mime, data_base64)
             self.create_image_popup(view, region, width, height, src)
 
+    def convert_svg_create_popup(self, local_path: str, view: sublime.View, region: sublime.Region) -> None:
+        try:
+            data = subprocess.check_output(['inkscape', '--export-type=png', '--export-filename=-', local_path])  # @todo Is it possible to use a checkboard pattern background for transparent images?
+            width, height = image_size(data)
+            data_base64 = b64encode(data).decode('ascii')
+            src = 'data:image/png;base64,{}'.format(data_base64)
+            self.create_image_popup(view, region, width, height, src)
+        except:
+            pass
+
     def create_image_popup(self, view: sublime.View, region: sublime.Region, width: int, height: int, src: str) -> None:
         device_scale_factor = EM_SCALE_FACTOR * view.em_width()
         scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
-        popup_border_width = sublime.load_settings(SETTINGS_FILE).get("popup_border_width")
+        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
         popup_width = scaled_width + int(2 * popup_border_width * device_scale_factor)
         # popup_height = scaled_height + int((2 * popup_border_width + 9) * device_scale_factor)
         label = image_size_label(width, height)
