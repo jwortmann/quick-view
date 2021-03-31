@@ -21,8 +21,16 @@ MIN_POPUP_IMAGE_WIDTH = 100
 MAX_POPUP_IMAGE_WIDTH = 200
 
 SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
-SUPPORTED_MIME_TYPES = ('image/bmp', 'image/gif', 'image/jpeg', 'image/png')
-ST_NATIVE_FORMATS = ('.bmp', '.gif', '.jpg', '.jpeg', '.png')  # @todo Add support for svg and webp images if possible without binary dependency
+
+# @todo Add support for webp images if possible without binary dependency
+SUPPORTED_IMAGE_FORMATS = {
+    '.bmp': 'image/bmp',
+    '.gif': 'image/gif',
+    '.jpeg': 'image/jpeg',
+    '.jpg': 'image/jpeg',
+    '.png': 'image/png',
+    '.svg': 'image/svg+xml'
+}
 
 COLOR_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
 
@@ -182,15 +190,16 @@ def scale_image(width: int, height: int, device_scale_factor: float) -> tuple:
     - resulting image width is at least MIN_POPUP_IMAGE_WIDTH
     - none of resulting image width and height is larger than MAX_POPUP_IMAGE_WIDTH, unless this contradicts with the previous rule
     """
-    if width == -1 or height == -1:  # assume 16:9 aspect ratio
-        return int(MAX_POPUP_IMAGE_WIDTH * device_scale_factor), int(9/16 * MAX_POPUP_IMAGE_WIDTH * device_scale_factor)
+    if width == -1 or height == -1:  # assume 1:1 aspect ratio
+        scaled_width = int(MIN_POPUP_IMAGE_WIDTH * device_scale_factor)
+        return scaled_width, scaled_width
     image_scale_factor = min(MAX_POPUP_IMAGE_WIDTH / max(width, height), 1)
     scale_correction = max(MIN_POPUP_IMAGE_WIDTH / image_scale_factor / width, 1)
     scale_factor = image_scale_factor * device_scale_factor * scale_correction
     return int(scale_factor * width), int(scale_factor * height)
 
 def image_size_label(width: int, height: int) -> str:
-    return '{} \u00d7 {} pixels'.format(width, height)
+    return '{} \u00d7 {} pixels'.format(width, height) if width != -1 else 'unknown size'
 
 def format_template(view: sublime.View, popup_width: int, content: str) -> str:
     margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()
@@ -208,22 +217,28 @@ def request_img(url: str) -> tuple:
             length = int(length)
             if length == 0:
                 raise ValueError('empty payload')
-            max_payload_size = sublime.load_settings(SETTINGS_FILE).get('max_payload_size', 8096)  # @todo Maybe document this setting?
             mime = response.headers.get('content-type').lower()
-            if mime not in SUPPORTED_MIME_TYPES:
+            if mime not in SUPPORTED_IMAGE_FORMATS.values():
                 raise ValueError('mime type ' + mime + ' is no image or not supported')
-            elif length > max_payload_size * 1024:
+            max_payload_size = sublime.load_settings(SETTINGS_FILE).get('max_payload_size', 8096)  # @todo Maybe document this setting?
+            if length > max_payload_size * 1024:
                 raise ValueError('refusing to download files larger than ' + str(max_payload_size) + 'kB')
             data = response.read()
-            width, height = image_size(data)
-            data_base64 = b64encode(data).decode('ascii')
-            return mime, data_base64, width, height
+            return mime, data
     except timeout:
         debug(timeout, 'timeout for url', url)
-        return None, None, None, None
+        return None, None
     except Exception as ex:
         debug(ex, 'for url', url)
-        return None, None, None, None
+        return None, None
+
+@lru_cache(maxsize=16)
+def svg2png(data: bytes) -> bytes:
+    debug('using inkscape to convert svg')
+    p = subprocess.Popen(['inkscape', '--pipe', '--export-type=png', '--export-filename=-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    png, _ = p.communicate(data)
+    p.stdin.close()
+    return png
 
 def image_size(data) -> tuple:
     width = -1
@@ -265,8 +280,8 @@ def image_size(data) -> tuple:
                 height = abs(height)
             else:
                 raise ValueError('Unknown DIB header size: ' + str(headerSize))
-    except Exception:
-        pass
+    except Exception as ex:
+        debug(ex)
     return width, height
 
 
@@ -355,7 +370,7 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
             self.rgb_color_swatch(region)
             return
         _, _, lightness = hex2hsl(self.view.style()['background'])
-        color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
+        color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # @see https://www.sublimetext.com/docs/minihtml.html#predefined_classes
         bg_white = self.BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
         bg_black = self.BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
         r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
@@ -396,69 +411,91 @@ class ImageHoverListener(sublime_plugin.EventListener):
             url = url[1:]
         if view.match_selector(region.b - 1, 'punctuation.definition.string.end'):
             url = url[:-1]
-        if url.startswith('data:'):
-            try:
-                _, mime, _, data_base64 = re.split(r'[:;,]', url)
-            except ValueError:
-                return
-            if mime not in SUPPORTED_MIME_TYPES:
-                return
-            data = b64decode(data_base64)
-            width, height = image_size(data)
-            self.create_image_popup(view, region, width, height, url)
+        if url.lower().startswith('data:'):
+            self.data_image_popup(view, region, url)
         elif url.lower().startswith(SUPPORTED_PROTOCOLS):
-            if url.lower().endswith(ST_NATIVE_FORMATS) or settings.get('extensionless_image_preview'):
-                sublime.set_timeout_async(lambda: self.request_img_create_popup(url, view, region))
-        elif url.lower().endswith(ST_NATIVE_FORMATS):
+            if url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())) or settings.get('extensionless_image_preview'):
+                if url.lower().endswith('.svg') and settings.get('svg_converter') != 'inkscape':
+                    return
+                sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
+        elif url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())):
+            self.local_image_popup(view, region, url)
+
+    def local_path(self, view: sublime.View, url: str):
+        if os.path.isabs(url):
+            return url
+        else:
             file_name = view.file_name()
-            if not file_name:  # @todo Don't return if url is an absolute path
-                return
-            local_path = os.path.abspath(os.path.join(os.path.dirname(file_name), url))
-            if not os.path.exists(local_path):
-                return
-            debug('loading image from', local_path)
-            with open(local_path, 'rb') as data:
-                width, height = image_size(data)
-            src = 'file://' + local_path
-            self.create_image_popup(view, region, width, height, src)
-        elif url.lower().endswith('.svg'):  # @todo Add support for internet urls (with url cache)
-            svg_converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')  # @todo Add to settings
-            if not svg_converter:
-                return
-            file_name = view.file_name()
-            if not file_name:  # @todo Don't return if url is an absolute path
-                return
-            local_path = os.path.abspath(os.path.join(os.path.dirname(file_name), url))
-            if not os.path.exists(local_path):
-                return
-            debug('loading image from', local_path)
-            if svg_converter == 'inkscape':
-                debug('using inkscape to convert svg')
-                sublime.set_timeout_async(lambda: self.convert_svg_create_popup(local_path, view, region))
-            elif svg_converter == 'cairo':
-                raise ValueError('cairo not yet supported')
-            elif svg_converter == 'magick':
-                raise ValueError('magick not yet supported')
+            if not file_name:
+                return None
             else:
-                raise ValueError('unsupported converter: {}'.format(svg_converter))
+                return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
 
-    def request_img_create_popup(self, url: str, view: sublime.View, region: sublime.Region) -> None:
-        mime, data_base64, width, height = request_img(url)
-        if mime:
-            src = data_template.format(mime, data_base64)
-            self.create_image_popup(view, region, width, height, src)
-
-    def convert_svg_create_popup(self, local_path: str, view: sublime.View, region: sublime.Region) -> None:
+    def data_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
         try:
-            data = subprocess.check_output(['inkscape', '--export-type=png', '--export-filename=-', local_path])  # @todo Is it possible to use a checkboard pattern background for transparent images?
+            _, mime, encoding, data = re.split(r'[:;,]', url.lower(), maxsplit=3)
+        except ValueError:
+            return
+        if mime not in SUPPORTED_IMAGE_FORMATS.values():
+            return
+        if encoding == 'base64':
+            data = b64decode(data)
+        elif encoding == 'utf8':
+            data = bytes(data, 'utf-8')
+        else:
+            return
+        if mime == 'image/svg+xml':
+            try:
+                data = svg2png(data)
+                width, height = image_size(data)
+                data_base64 = b64encode(data).decode('ascii')
+                src = data_template.format(mime, data_base64)
+                self.image_popup(view, region, width, height, src)
+            except Exception as ex:
+                debug(ex)
+        else:
             width, height = image_size(data)
-            data_base64 = b64encode(data).decode('ascii')
-            src = 'data:image/png;base64,{}'.format(data_base64)
-            self.create_image_popup(view, region, width, height, src)
-        except:
-            pass
+            self.image_popup(view, region, width, height, url)
 
-    def create_image_popup(self, view: sublime.View, region: sublime.Region, width: int, height: int, src: str) -> None:
+    def local_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
+        path = self.local_path(view, url)
+        if not path or not os.path.isfile(path):
+            return
+        debug('loading image from', path)
+        if path.lower().endswith('.svg'):
+            if sublime.load_settings(SETTINGS_FILE).get('svg_converter') == 'inkscape':  # @todo Add to settings
+                debug('using inkscape to convert svg')
+                try:
+                    data = subprocess.check_output(['inkscape', '--export-type=png', '--export-filename=-', path])  # @todo Is it possible to use a checkboard pattern background for transparent images?
+                    width, height = image_size(data)
+                    data_base64 = b64encode(data).decode('ascii')
+                    src = data_template.format('image/png', data_base64)
+                    self.image_popup(view, region, width, height, src)
+                except Exception as ex:
+                    debug(ex)
+        else:
+            with open(path, 'rb') as data:
+                width, height = image_size(data)
+            src = 'file://' + path
+            self.image_popup(view, region, width, height, src)
+
+    def web_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
+        mime, data = request_img(url)
+        if not mime or not data:
+            return
+        if mime == 'image/svg+xml':
+            mime = 'image/png'
+            try:
+                data = svg2png(data)
+            except Exception as ex:
+                debug(ex)
+                return
+        width, height = image_size(data)
+        data_base64 = b64encode(data).decode('ascii')
+        src = data_template.format(mime, data_base64)
+        self.image_popup(view, region, width, height, src)
+
+    def image_popup(self, view: sublime.View, region: sublime.Region, width: int, height: int, src: str) -> None:
         device_scale_factor = EM_SCALE_FACTOR * view.em_width()
         scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
         popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
