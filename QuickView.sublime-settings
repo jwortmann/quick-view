@@ -12,6 +12,12 @@
     // (e.g., https://avatars.githubusercontent.com/u/684879?s=200&v=4)
     "extensionless_image_preview": false,
 
+    // Image previews for the SVG file format require an installed image converter program.
+    // The executable of the converter program must be available on the PATH. Valid options are:
+    //  - "inkscape" (Inkscape)
+    //  - "magick" (ImageMagick)
+    "svg_converter": "",
+
     // The border width of the popups. This might not correspond with actual pixel values,
     // depending on your screen resolution and font size.
     "popup_border_width": 8

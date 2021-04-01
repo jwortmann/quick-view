@@ -202,7 +202,7 @@ def image_size_label(width: int, height: int) -> str:
     return '{} \u00d7 {} pixels'.format(width, height) if width != -1 else 'unknown size'
 
 def format_template(view: sublime.View, popup_width: int, content: str) -> str:
-    margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()
+    margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()  # @todo Does this work on high DPI displays? Should maybe better rem units instead of px here
     popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
     return quickview_template.format(margin=margin, border=popup_border_width, content=content)
 
@@ -233,9 +233,20 @@ def request_img(url: str) -> tuple:
         return None, None
 
 @lru_cache(maxsize=16)
-def svg2png(data: bytes) -> bytes:
-    debug('using inkscape to convert svg')
-    p = subprocess.Popen(['inkscape', '--pipe', '--export-type=png', '--export-filename=-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+def svg2png(data: bytes, converter: str) -> bytes:
+    if converter == 'inkscape':
+        debug('using Inkscape to convert SVG')
+        p = subprocess.Popen(['inkscape', '--pipe', '--export-type=png', '--export-filename=-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    elif converter == 'magick':
+        debug('using ImageMagick to convert SVG')
+        if sublime.platform() == 'windows':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            p = subprocess.Popen(['magick', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        else:
+            p = subprocess.Popen(['magick', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    else:
+        raise ValueError('unknown SVG converter: {}'.format(converter))
     png, _ = p.communicate(data)
     p.stdin.close()
     return png
@@ -356,7 +367,7 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
                     return
 
     def rgb_color_swatch(self, region: sublime.Region) -> None:
-        popup_border_width = sublime.load_settings(SETTINGS_FILE).get("popup_border_width")
+        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
         popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * self.view.em_width())
         # popup_height = int((40 + 2 * popup_border_width + 9) * EM_SCALE_FACTOR * self.view.em_width())
         location = popup_location(self.view, region, popup_width)
@@ -378,7 +389,7 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
         data_base64 = base64png(r1, g1, b1, r2, g2, b2)
         device_scale_factor = EM_SCALE_FACTOR * self.view.em_width()
         scaled_width = int(40 * device_scale_factor)
-        popup_border_width = sublime.load_settings(SETTINGS_FILE).get("popup_border_width")
+        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
         popup_width = int((40 + 2 * popup_border_width) * device_scale_factor)
         # popup_height = int((40 + 2 * popup_border_width + 9) * device_scale_factor)
         location = popup_location(self.view, region, popup_width)
@@ -415,7 +426,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
             self.data_image_popup(view, region, url)
         elif url.lower().startswith(SUPPORTED_PROTOCOLS):
             if url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())) or settings.get('extensionless_image_preview'):
-                if url.lower().endswith('.svg') and settings.get('svg_converter') != 'inkscape':
+                if url.lower().endswith('.svg') and settings.get('svg_converter') not in ['inkscape', 'magick']:
                     return
                 sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
         elif url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())):
@@ -445,8 +456,11 @@ class ImageHoverListener(sublime_plugin.EventListener):
         else:
             return
         if mime == 'image/svg+xml':
+            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
+            if converter not in ['inkscape', 'magick']:
+                return
             try:
-                data = svg2png(data)
+                data = svg2png(data, converter)
                 width, height = image_size(data)
                 data_base64 = b64encode(data).decode('ascii')
                 src = data_template.format(mime, data_base64)
@@ -461,23 +475,43 @@ class ImageHoverListener(sublime_plugin.EventListener):
         path = self.local_path(view, url)
         if not path or not os.path.isfile(path):
             return
-        debug('loading image from', path)
         if path.lower().endswith('.svg'):
-            if sublime.load_settings(SETTINGS_FILE).get('svg_converter') == 'inkscape':  # @todo Add to settings
-                debug('using inkscape to convert svg')
+            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
+            if converter == 'inkscape':
+                debug('loading image from', path)
+                debug('using Inkscape to convert SVG')
                 try:
                     data = subprocess.check_output(['inkscape', '--export-type=png', '--export-filename=-', path])  # @todo Is it possible to use a checkboard pattern background for transparent images?
-                    width, height = image_size(data)
-                    data_base64 = b64encode(data).decode('ascii')
-                    src = data_template.format('image/png', data_base64)
-                    self.image_popup(view, region, width, height, src)
                 except Exception as ex:
                     debug(ex)
+                    return
+            elif converter == 'magick':
+                debug('loading image from', path)
+                debug('using ImageMagick to convert SVG')
+                try:
+                    if sublime.platform() == 'windows':
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        data = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
+                    else:
+                        data = subprocess.check_output(['magick', path, 'png:-'])
+                except Exception as ex:
+                    debug(ex)
+                    return
+            elif converter == '':
+                return
+            else:
+                debug('unknown SVG converter: {}'.format(converter))
+                return
+            width, height = image_size(data)
+            data_base64 = b64encode(data).decode('ascii')
+            src = data_template.format('image/png', data_base64)
         else:
+            debug('loading image from', path)
+            src = 'file://' + path
             with open(path, 'rb') as data:
                 width, height = image_size(data)
-            src = 'file://' + path
-            self.image_popup(view, region, width, height, src)
+        self.image_popup(view, region, width, height, src)
 
     def web_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
         mime, data = request_img(url)
@@ -485,8 +519,9 @@ class ImageHoverListener(sublime_plugin.EventListener):
             return
         if mime == 'image/svg+xml':
             mime = 'image/png'
+            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
             try:
-                data = svg2png(data)
+                data = svg2png(data, converter)
             except Exception as ex:
                 debug(ex)
                 return
