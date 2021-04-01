@@ -418,9 +418,9 @@ class ImageHoverListener(sublime_plugin.EventListener):
             return
         region = view.extract_scope(point)
         url = view.substr(region)
-        if view.match_selector(region.a, 'punctuation.definition.string.begin'):
+        if view.match_selector(region.a, 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
             url = url[1:]
-        if view.match_selector(region.b - 1, 'punctuation.definition.string.end'):
+        if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
             url = url[:-1]
         if url.lower().startswith('data:'):
             self.data_image_popup(view, region, url)
