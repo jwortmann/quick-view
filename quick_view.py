@@ -430,6 +430,8 @@ class ImageHoverListener(sublime_plugin.EventListener):
                     return
                 sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
         elif url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())):
+            if url.lower().startswith('file://'):
+                url = url[7:]
             self.local_image_popup(view, region, url)
 
     def local_path(self, view: sublime.View, url: str):
