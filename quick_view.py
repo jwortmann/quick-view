@@ -22,14 +22,14 @@ MAX_POPUP_IMAGE_WIDTH = 200
 
 SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
 
-# @todo Add support for webp images if possible without binary dependency
 SUPPORTED_IMAGE_FORMATS = {
     '.bmp': 'image/bmp',
     '.gif': 'image/gif',
     '.jpeg': 'image/jpeg',
     '.jpg': 'image/jpeg',
     '.png': 'image/png',
-    '.svg': 'image/svg+xml'
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp'
 }
 
 COLOR_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
@@ -251,6 +251,22 @@ def svg2png(data: bytes, converter: str) -> bytes:
     p.stdin.close()
     return png
 
+@lru_cache(maxsize=16)
+def webp2png(data: bytes, converter: str) -> bytes:
+    if converter == 'magick':
+        debug('using ImageMagick to convert WebP')
+        if sublime.platform() == 'windows':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            p = subprocess.Popen(['magick', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        else:
+            p = subprocess.Popen(['magick', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    else:
+        raise ValueError('unknown WebP converter: {}'.format(converter))
+    png, _ = p.communicate(data)
+    p.stdin.close()
+    return png
+
 def image_size(data) -> tuple:
     width = -1
     height = -1
@@ -428,6 +444,8 @@ class ImageHoverListener(sublime_plugin.EventListener):
             if url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())) or settings.get('extensionless_image_preview'):
                 if url.lower().endswith('.svg') and settings.get('svg_converter') not in ['inkscape', 'magick']:
                     return
+                elif url.lower().endswith('.webp') and settings.get('svg_converter') not in ['magick']:
+                    return
                 sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
         elif url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())):
             if url.lower().startswith('file://'):
@@ -473,6 +491,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
             width, height = image_size(data)
             self.image_popup(view, region, width, height, url)
 
+    # @todo This needs a bit of refactoring
     def local_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
         path = self.local_path(view, url)
         if not path or not os.path.isfile(path):
@@ -508,6 +527,26 @@ class ImageHoverListener(sublime_plugin.EventListener):
             width, height = image_size(data)
             data_base64 = b64encode(data).decode('ascii')
             src = data_template.format('image/png', data_base64)
+        elif path.lower().endswith('.webp'):
+            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
+            if converter == 'magick':
+                debug('loading image from', path)
+                debug('using ImageMagick to convert WebP')
+                try:
+                    if sublime.platform() == 'windows':
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        data = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
+                    else:
+                        data = subprocess.check_output(['magick', path, 'png:-'])
+                except Exception as ex:
+                    debug(ex)
+                    return
+            else:
+                return
+            width, height = image_size(data)
+            data_base64 = b64encode(data).decode('ascii')
+            src = data_template.format('image/png', data_base64)
         else:
             debug('loading image from', path)
             src = 'file://' + path
@@ -524,6 +563,13 @@ class ImageHoverListener(sublime_plugin.EventListener):
             converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
             try:
                 data = svg2png(data, converter)
+            except Exception as ex:
+                debug(ex)
+                return
+        elif mime == 'image/webp':
+            mime = 'image/png'
+            try:
+                data = webp2png(data, 'magick')
             except Exception as ex:
                 debug(ex)
                 return
