@@ -12,6 +12,11 @@
     // (e.g., https://avatars.githubusercontent.com/u/684879?s=200&v=4)
     "extensionless_image_preview": false,
 
+    // Image previews for the AVIF file format require an installed image converter program.
+    // The executable of the converter program must be available on the PATH. Supported options are:
+    //  - "magick" (ImageMagick)
+    "avif_converter": "",
+
     // Image previews for the SVG file format require an installed image converter program.
     // The executable of the converter program must be available on the PATH. Supported options are:
     //  - "inkscape" (Inkscape)

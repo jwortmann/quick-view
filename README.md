@@ -26,8 +26,9 @@ Image previews are possible for the following file formats:
 * BMP
 * SVG
 * WebP
+* AVIF
 
-The SVG and WebP formats require an installed image converter and must be activated in the package settings.
+The SVG, WebP and AVIF formats require an installed image converter and must be activated in the package settings.
 
 Image and color previews can be disabled separately in the package settings.
 

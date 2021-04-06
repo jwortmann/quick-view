@@ -23,6 +23,7 @@ MAX_POPUP_IMAGE_WIDTH = 200
 SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
 
 SUPPORTED_IMAGE_FORMATS = {
+    '.avif': 'image/avif',
     '.bmp': 'image/bmp',
     '.gif': 'image/gif',
     '.jpeg': 'image/jpeg',
@@ -232,6 +233,7 @@ def request_img(url: str) -> tuple:
         debug(ex, 'for url', url)
         return None, None
 
+# @todo These functions can probably be refactored into a single function
 @lru_cache(maxsize=16)
 def svg2png(data: bytes, converter: str) -> bytes:
     if converter == 'inkscape':
@@ -271,6 +273,22 @@ def webp2png(data: bytes, converter: str) -> bytes:
             p = subprocess.Popen(['magick', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     else:
         raise ValueError('unknown WebP converter: {}'.format(converter))
+    png, _ = p.communicate(data)
+    p.stdin.close()
+    return png
+
+@lru_cache(maxsize=16)
+def avif2png(data: bytes, converter: str) -> bytes:
+    if converter == 'magick':
+        debug('using ImageMagick to convert AVIF image')
+        if sublime.platform() == 'windows':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            p = subprocess.Popen(['magick', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        else:
+            p = subprocess.Popen(['magick', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    else:
+        raise ValueError('unknown AVIF converter: {}'.format(converter))
     png, _ = p.communicate(data)
     p.stdin.close()
     return png
@@ -454,6 +472,8 @@ class ImageHoverListener(sublime_plugin.EventListener):
                     return
                 elif url.lower().endswith('.webp') and settings.get('webp_converter') not in ['dwebp', 'magick']:
                     return
+                elif url.lower().endswith('.avif') and settings.get('avif_converter') not in ['magick']:
+                    return
                 sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
         elif url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())):
             if url.lower().startswith('file://'):
@@ -483,6 +503,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
             data = bytes(data, 'utf-8')
         else:
             return
+        # @todo Are WebP or AVIF formats possible here too?
         if mime == 'image/svg+xml':
             converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
             if converter not in ['inkscape', 'magick']:
@@ -571,6 +592,29 @@ class ImageHoverListener(sublime_plugin.EventListener):
             width, height = image_size(data)
             data_base64 = b64encode(data).decode('ascii')
             src = data_template.format('image/png', data_base64)
+        elif path.lower().endswith('.avif'):
+            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
+            if converter == 'magick':
+                debug('loading image from', path)
+                debug('using ImageMagick to convert AVIF image')
+                try:
+                    if sublime.platform() == 'windows':
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        data = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
+                    else:
+                        data = subprocess.check_output(['magick', path, 'png:-'])
+                except Exception as ex:
+                    debug(ex)
+                    return
+            elif converter == '':
+                return
+            else:
+                debug('unknown AVIF converter: {}'.format(converter))
+                return
+            width, height = image_size(data)
+            data_base64 = b64encode(data).decode('ascii')
+            src = data_template.format('image/png', data_base64)
         else:
             debug('loading image from', path)
             src = 'file://' + path
@@ -595,6 +639,14 @@ class ImageHoverListener(sublime_plugin.EventListener):
             converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
             try:
                 data = webp2png(data, converter)
+            except Exception as ex:
+                debug(ex)
+                return
+        elif mime == 'image/avif':
+            mime = 'image/png'
+            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
+            try:
+                data = avif2png(data, converter)
             except Exception as ex:
                 debug(ex)
                 return
