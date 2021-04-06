@@ -19,11 +19,15 @@ From the command palette select *Package Control: Install Package* and search fo
 
 Hover over an image link or CSS color in a supported syntax to show a preview popup.
 Image previews are possible for the following file formats:
+
 * PNG
 * JPEG
 * GIF
 * BMP
-* SVG (requires an installed image converter and must be activated in the package settings)
+* SVG
+* WebP
+
+The SVG and WebP formats require an installed image converter and must be activated in the package settings.
 
 Image and color previews can be disabled separately in the package settings.
 

@@ -13,10 +13,16 @@
     "extensionless_image_preview": false,
 
     // Image previews for the SVG file format require an installed image converter program.
-    // The executable of the converter program must be available on the PATH. Valid options are:
+    // The executable of the converter program must be available on the PATH. Supported options are:
     //  - "inkscape" (Inkscape)
     //  - "magick" (ImageMagick)
     "svg_converter": "",
+
+    // Image previews for the WebP file format require an installed image converter program.
+    // The executable of the converter program must be available on the PATH. Supported options are:
+    //  - "dwebp" (precompiled WebP utility from https://developers.google.com/speed/webp/docs/precompiled)
+    //  - "magick" (ImageMagick)
+    "webp_converter": "",
 
     // The border width of the popups. This might not correspond with actual pixel values,
     // depending on your screen resolution and font size.

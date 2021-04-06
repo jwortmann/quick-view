@@ -235,10 +235,10 @@ def request_img(url: str) -> tuple:
 @lru_cache(maxsize=16)
 def svg2png(data: bytes, converter: str) -> bytes:
     if converter == 'inkscape':
-        debug('using Inkscape to convert SVG')
+        debug('using Inkscape to convert SVG image')
         p = subprocess.Popen(['inkscape', '--pipe', '--export-type=png', '--export-filename=-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     elif converter == 'magick':
-        debug('using ImageMagick to convert SVG')
+        debug('using ImageMagick to convert SVG image')
         if sublime.platform() == 'windows':
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -253,8 +253,16 @@ def svg2png(data: bytes, converter: str) -> bytes:
 
 @lru_cache(maxsize=16)
 def webp2png(data: bytes, converter: str) -> bytes:
-    if converter == 'magick':
-        debug('using ImageMagick to convert WebP')
+    if converter == 'dwebp':
+        debug('using dwebp to convert WebP image')
+        if sublime.platform() == 'windows':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        else:
+            p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    elif converter == 'magick':
+        debug('using ImageMagick to convert WebP image')
         if sublime.platform() == 'windows':
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -444,7 +452,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
             if url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())) or settings.get('extensionless_image_preview'):
                 if url.lower().endswith('.svg') and settings.get('svg_converter') not in ['inkscape', 'magick']:
                     return
-                elif url.lower().endswith('.webp') and settings.get('svg_converter') not in ['magick']:
+                elif url.lower().endswith('.webp') and settings.get('webp_converter') not in ['dwebp', 'magick']:
                     return
                 sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
         elif url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())):
@@ -508,7 +516,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
                     return
             elif converter == 'magick':
                 debug('loading image from', path)
-                debug('using ImageMagick to convert SVG')
+                debug('using ImageMagick to convert SVG image')
                 try:
                     if sublime.platform() == 'windows':
                         startupinfo = subprocess.STARTUPINFO()
@@ -528,10 +536,23 @@ class ImageHoverListener(sublime_plugin.EventListener):
             data_base64 = b64encode(data).decode('ascii')
             src = data_template.format('image/png', data_base64)
         elif path.lower().endswith('.webp'):
-            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
-            if converter == 'magick':
+            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
+            if converter == 'dwebp':
                 debug('loading image from', path)
-                debug('using ImageMagick to convert WebP')
+                debug('using dwebp to convert WebP image')
+                try:
+                    if sublime.platform() == 'windows':
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        data = subprocess.check_output(['dwebp', '-o', '-', '--', path], startupinfo=startupinfo)
+                    else:
+                        data = subprocess.check_output(['dwebp', '-o', '-', '--', path])
+                except Exception as ex:
+                    debug(ex)
+                    return
+            elif converter == 'magick':
+                debug('loading image from', path)
+                debug('using ImageMagick to convert WebP image')
                 try:
                     if sublime.platform() == 'windows':
                         startupinfo = subprocess.STARTUPINFO()
@@ -542,7 +563,10 @@ class ImageHoverListener(sublime_plugin.EventListener):
                 except Exception as ex:
                     debug(ex)
                     return
+            elif converter == '':
+                return
             else:
+                debug('unknown WebP converter: {}'.format(converter))
                 return
             width, height = image_size(data)
             data_base64 = b64encode(data).decode('ascii')
@@ -568,8 +592,9 @@ class ImageHoverListener(sublime_plugin.EventListener):
                 return
         elif mime == 'image/webp':
             mime = 'image/png'
+            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
             try:
-                data = webp2png(data, 'magick')
+                data = webp2png(data, converter)
             except Exception as ex:
                 debug(ex)
                 return
