@@ -309,13 +309,13 @@ def convert_bytes2png(data: bytes, input_format: int, converter: str) -> bytes:
         p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     elif converter == 'magick' and  input_format == ImageFormat.SVG:
         debug('using ImageMagick to convert SVG image')
-        p = subprocess.Popen(['magick', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        p = subprocess.Popen(['magick', '-background', 'transparent', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     elif converter == 'magick' and input_format == ImageFormat.WEBP:
         debug('using ImageMagick to convert WebP image')
-        p = subprocess.Popen(['magick', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        p = subprocess.Popen(['magick', '-background', 'transparent', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     elif converter == 'magick' and input_format == ImageFormat.AVIF:
         debug('using ImageMagick to convert AVIF image')
-        p = subprocess.Popen(['magick', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        p = subprocess.Popen(['magick', '-background', 'transparent', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     else:
         raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     png, _ = p.communicate(data)
@@ -336,7 +336,7 @@ def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
         png = subprocess.check_output(['dwebp', '-o', '-', '--', path], startupinfo=startupinfo)
     elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
         debug('using ImageMagick to convert', IMAGE_FORMAT_NAMES[input_format], 'image')
-        png = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
+        png = subprocess.check_output(['magick', '-background', 'transparent', path, 'png:-'], startupinfo=startupinfo)
     else:
         raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     return png
