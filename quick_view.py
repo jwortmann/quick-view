@@ -22,17 +22,6 @@ MAX_POPUP_IMAGE_WIDTH = 200
 
 SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
 
-SUPPORTED_IMAGE_FORMATS = {
-    '.avif': 'image/avif',
-    '.bmp': 'image/bmp',
-    '.gif': 'image/gif',
-    '.jpeg': 'image/jpeg',
-    '.jpg': 'image/jpeg',
-    '.png': 'image/png',
-    '.svg': 'image/svg+xml',
-    '.webp': 'image/webp'
-}
-
 COLOR_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
 
 flags = sublime.HIDE_ON_MOUSE_MOVE_AWAY
@@ -100,6 +89,78 @@ quickview_template = '''
 
 data_template = 'data:{};base64,{}'
 
+class ImageFormat:
+    UNSUPPORTED = 0
+    PNG = 1
+    JPEG = 2
+    GIF = 3
+    BMP = 4
+    SVG = 5
+    WEBP = 6
+    AVIF = 7
+
+class MimeType:
+    PNG = 'image/png'
+    JPEG = 'image/jpeg'
+    GIF = 'image/gif'
+    BMP = 'image/bmp'
+    SVG = 'image/svg+xml'
+    WEBP = 'image/webp'
+    AVIF = 'image/avif'
+
+NATIVE_IMAGE_FORMATS = [ImageFormat.PNG, ImageFormat.JPEG, ImageFormat.GIF, ImageFormat.BMP]
+CONVERTABLE_IMAGE_FORMATS = [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]
+SUPPORTED_MIME_TYPES = [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP, MimeType.SVG, MimeType.WEBP, MimeType.AVIF]
+
+SUPPORTED_CONVERTERS = {
+    ImageFormat.SVG: ['inkscape', 'magick'],
+    ImageFormat.WEBP: ['dwebp', 'magick'],
+    ImageFormat.AVIF: ['magick']
+}
+
+IMAGE_FORMAT_NAMES = {
+    ImageFormat.SVG: 'SVG',
+    ImageFormat.WEBP: 'WebP',
+    ImageFormat.AVIF: 'AVIF'
+}
+
+def format_from_url(url: str) -> int:
+    _, file_extension = os.path.splitext(url.lower())
+    if file_extension == '.png':
+        return ImageFormat.PNG
+    elif file_extension in ['.jpg', '.jpeg']:
+        return ImageFormat.JPEG
+    elif file_extension == '.gif':
+        return ImageFormat.GIF
+    elif file_extension == '.bmp':
+        return ImageFormat.BMP
+    elif file_extension == '.svg':
+        return ImageFormat.SVG
+    elif file_extension == '.webp':
+        return ImageFormat.WEBP
+    elif file_extension == '.avif':
+        return ImageFormat.AVIF
+    else:
+        return ImageFormat.UNSUPPORTED
+
+def format_from_mime(mime: str) -> int:
+    if mime == MimeType.PNG:
+        return ImageFormat.PNG
+    elif mime == MimeType.JPEG:
+        return ImageFormat.JPEG
+    elif mime == MimeType.GIF:
+        return ImageFormat.GIF
+    elif mime == MimeType.BMP:
+        return ImageFormat.BMP
+    elif mime == MimeType.SVG:
+        return ImageFormat.SVG
+    elif mime == MimeType.WEBP:
+        return ImageFormat.WEBP
+    elif mime == MimeType.AVIF:
+        return ImageFormat.AVIF
+    else:
+        return ImageFormat.UNSUPPORTED
+
 def debug(*msg) -> None:
     if sublime.load_settings(SETTINGS_FILE).get('debug', False):
         print('QuickView:', *msg)
@@ -141,7 +202,7 @@ def hex2hsl(color: str) -> tuple:
     return h, s, l
 
 @lru_cache(maxsize=128)
-def base64png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> str:
+def checkerboard_png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> str:
     pixels = list()
     row_type1 = list()
     row_type2 = list()
@@ -203,7 +264,7 @@ def image_size_label(width: int, height: int) -> str:
     return '{} \u00d7 {} pixels'.format(width, height) if width != -1 else 'unknown size'
 
 def format_template(view: sublime.View, popup_width: int, content: str) -> str:
-    margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()  # @todo Does this work on high DPI displays? Should maybe better rem units instead of px here
+    margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()  # @todo Does this work on high DPI displays? Should maybe better use rem units instead of px here
     popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
     return quickview_template.format(margin=margin, border=popup_border_width, content=content)
 
@@ -219,78 +280,65 @@ def request_img(url: str) -> tuple:
             if length == 0:
                 raise ValueError('empty payload')
             mime = response.headers.get('content-type').lower()
-            if mime not in SUPPORTED_IMAGE_FORMATS.values():
-                raise ValueError('mime type ' + mime + ' is no image or not supported')
+            if mime not in SUPPORTED_MIME_TYPES:
+                raise ValueError('mime type ' + mime + ' is not supported')
             max_payload_size = sublime.load_settings(SETTINGS_FILE).get('max_payload_size', 8096)  # @todo Maybe document this setting?
             if length > max_payload_size * 1024:
                 raise ValueError('refusing to download files larger than ' + str(max_payload_size) + 'kB')
             data = response.read()
             return mime, data
     except timeout:
-        debug(timeout, 'timeout for url', url)
+        debug('timeout for url', url)
         return None, None
     except Exception as ex:
         debug(ex, 'for url', url)
         return None, None
 
-# @todo These functions can probably be refactored into a single function
 @lru_cache(maxsize=16)
-def svg2png(data: bytes, converter: str) -> bytes:
-    if converter == 'inkscape':
+def convert_bytes2png(data: bytes, input_format: int, converter: str) -> bytes:
+    if sublime.platform() == 'windows':
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    else:
+        startupinfo = None
+    if converter == 'inkscape' and input_format == ImageFormat.SVG:
         debug('using Inkscape to convert SVG image')
-        p = subprocess.Popen(['inkscape', '--pipe', '--export-type=png', '--export-filename=-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    elif converter == 'magick':
-        debug('using ImageMagick to convert SVG image')
-        if sublime.platform() == 'windows':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            p = subprocess.Popen(['magick', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
-        else:
-            p = subprocess.Popen(['magick', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    else:
-        raise ValueError('unknown SVG converter: {}'.format(converter))
-    png, _ = p.communicate(data)
-    p.stdin.close()
-    return png
-
-@lru_cache(maxsize=16)
-def webp2png(data: bytes, converter: str) -> bytes:
-    if converter == 'dwebp':
+        p = subprocess.Popen(['inkscape', '--pipe', '--export-type=png'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+    elif converter == 'dwebp' and input_format == ImageFormat.WEBP:
         debug('using dwebp to convert WebP image')
-        if sublime.platform() == 'windows':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
-        else:
-            p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    elif converter == 'magick':
+        p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+    elif converter == 'magick' and  input_format == ImageFormat.SVG:
+        debug('using ImageMagick to convert SVG image')
+        p = subprocess.Popen(['magick', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+    elif converter == 'magick' and input_format == ImageFormat.WEBP:
         debug('using ImageMagick to convert WebP image')
-        if sublime.platform() == 'windows':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            p = subprocess.Popen(['magick', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
-        else:
-            p = subprocess.Popen(['magick', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        p = subprocess.Popen(['magick', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+    elif converter == 'magick' and input_format == ImageFormat.AVIF:
+        debug('using ImageMagick to convert AVIF image')
+        p = subprocess.Popen(['magick', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     else:
-        raise ValueError('unknown WebP converter: {}'.format(converter))
+        raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     png, _ = p.communicate(data)
     p.stdin.close()
     return png
 
-@lru_cache(maxsize=16)
-def avif2png(data: bytes, converter: str) -> bytes:
-    if converter == 'magick':
-        debug('using ImageMagick to convert AVIF image')
-        if sublime.platform() == 'windows':
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            p = subprocess.Popen(['magick', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
-        else:
-            p = subprocess.Popen(['magick', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
+    if sublime.platform() == 'windows':
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     else:
-        raise ValueError('unknown AVIF converter: {}'.format(converter))
-    png, _ = p.communicate(data)
-    p.stdin.close()
+        startupinfo = None
+    if converter == 'inkscape' and input_format == ImageFormat.SVG:
+        debug('using Inkscape to convert SVG image')
+        png = subprocess.check_output(['inkscape', '--export-type=png', '--export-filename=-', path], startupinfo=startupinfo)
+    elif converter == 'dwebp' and input_format == ImageFormat.WEBP:
+        debug('using dwebp to convert WebP image')
+        png = subprocess.check_output(['dwebp', '-o', '-', '--', path], startupinfo=startupinfo)
+    elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
+        debug('using ImageMagick to convert', IMAGE_FORMAT_NAMES[input_format], 'image')
+        png = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
+    else:
+        raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     return png
 
 def image_size(data) -> tuple:
@@ -332,7 +380,7 @@ def image_size(data) -> tuple:
                 width, height = struct.unpack('<ii', head[18:26])
                 height = abs(height)
             else:
-                raise ValueError('Unknown DIB header size: ' + str(headerSize))
+                raise ValueError('unknown DIB header size: ' + str(headerSize))
     except Exception as ex:
         debug(ex)
     return width, height
@@ -428,7 +476,7 @@ class ColorHoverListener(sublime_plugin.ViewEventListener):
         bg_black = self.BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
         r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
         r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
-        data_base64 = base64png(r1, g1, b1, r2, g2, b2)
+        data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
         device_scale_factor = EM_SCALE_FACTOR * self.view.em_width()
         scaled_width = int(40 * device_scale_factor)
         popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
@@ -465,20 +513,22 @@ class ImageHoverListener(sublime_plugin.EventListener):
         if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
             url = url[:-1]
         if url.lower().startswith('data:'):
-            self.data_image_popup(view, region, url)
-        elif url.lower().startswith(SUPPORTED_PROTOCOLS):
-            if url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())) or settings.get('extensionless_image_preview'):
-                if url.lower().endswith('.svg') and settings.get('svg_converter') not in ['inkscape', 'magick']:
-                    return
-                elif url.lower().endswith('.webp') and settings.get('webp_converter') not in ['dwebp', 'magick']:
-                    return
-                elif url.lower().endswith('.avif') and settings.get('avif_converter') not in ['magick']:
-                    return
-                sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
-        elif url.lower().endswith(tuple(SUPPORTED_IMAGE_FORMATS.keys())):
-            if url.lower().startswith('file://'):
-                url = url[7:]
-            self.local_image_popup(view, region, url)
+            sublime.set_timeout_async(lambda: self.data_image_popup(view, region, url))
+        else:
+            image_format = format_from_url(url)
+            if image_format == ImageFormat.SVG and settings.get('svg_converter') not in SUPPORTED_CONVERTERS[image_format]:
+                return
+            elif image_format == ImageFormat.WEBP and settings.get('webp_converter') not in SUPPORTED_CONVERTERS[image_format]:
+                return
+            elif image_format == ImageFormat.AVIF and settings.get('avif_converter') not in SUPPORTED_CONVERTERS[image_format]:
+                return
+            if url.lower().startswith(SUPPORTED_PROTOCOLS):
+                if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or settings.get('extensionless_image_preview'):
+                    sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
+            elif image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
+                if url.lower().startswith('file://'):
+                    url = url[7:]
+                sublime.set_timeout_async(lambda: self.local_image_popup(view, region, url))
 
     def local_path(self, view: sublime.View, url: str):
         if os.path.isabs(url):
@@ -490,163 +540,75 @@ class ImageHoverListener(sublime_plugin.EventListener):
             else:
                 return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
 
-    def data_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
+    def data_image_popup(self, view: sublime.View, region: sublime.Region, src: str) -> None:
         try:
-            _, mime, encoding, data = re.split(r'[:;,]', url.lower(), maxsplit=3)
+            _, mime, encoding, data = re.split(r'[:;,]', src.lower(), maxsplit=3)
         except ValueError:
             return
-        if mime not in SUPPORTED_IMAGE_FORMATS.values():
-            return
-        if encoding == 'base64':
-            data = b64decode(data)
-        elif encoding == 'utf8':
-            data = bytes(data, 'utf-8')
-        else:
-            return
         # @todo Are WebP or AVIF formats possible here too?
-        if mime == 'image/svg+xml':
+        if mime in [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP] and encoding == 'base64':
+            data = b64decode(data)
+        elif mime == MimeType.SVG and encoding == 'utf8':
             converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
-            if converter not in ['inkscape', 'magick']:
-                return
             try:
-                data = svg2png(data, converter)
-                width, height = image_size(data)
-                data_base64 = b64encode(data).decode('ascii')
-                src = data_template.format(mime, data_base64)
-                self.image_popup(view, region, width, height, src)
+                data = convert_bytes2png(bytes(data, 'utf-8'), ImageFormat.SVG, converter)
             except Exception as ex:
                 debug(ex)
+                return
+            data_base64 = b64encode(data).decode('ascii')
+            src = data_template.format(mime, data_base64)
         else:
-            width, height = image_size(data)
-            self.image_popup(view, region, width, height, url)
+            return
+        width, height = image_size(data)
+        self.image_popup(view, region, width, height, src)
 
-    # @todo This needs a bit of refactoring
     def local_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
         path = self.local_path(view, url)
         if not path or not os.path.isfile(path):
             return
-        if path.lower().endswith('.svg'):
-            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
-            if converter == 'inkscape':
-                debug('loading image from', path)
-                debug('using Inkscape to convert SVG')
-                try:
-                    data = subprocess.check_output(['inkscape', '--export-type=png', '--export-filename=-', path])  # @todo Is it possible to use a checkboard pattern background for transparent images?
-                except Exception as ex:
-                    debug(ex)
-                    return
-            elif converter == 'magick':
-                debug('loading image from', path)
-                debug('using ImageMagick to convert SVG image')
-                try:
-                    if sublime.platform() == 'windows':
-                        startupinfo = subprocess.STARTUPINFO()
-                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        data = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
-                    else:
-                        data = subprocess.check_output(['magick', path, 'png:-'])
-                except Exception as ex:
-                    debug(ex)
-                    return
-            elif converter == '':
-                return
+        image_format = format_from_url(path)
+        if image_format in CONVERTABLE_IMAGE_FORMATS:
+            if image_format == ImageFormat.SVG:
+                converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
+            elif image_format == ImageFormat.WEBP:
+                converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
+            elif image_format == ImageFormat.AVIF:
+                converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
             else:
-                debug('unknown SVG converter: {}'.format(converter))
+                return
+            debug('loading image from', path)
+            try:
+                data = convert_file2png(path, image_format, converter)
+            except Exception as ex:
+                debug(ex)
                 return
             width, height = image_size(data)
             data_base64 = b64encode(data).decode('ascii')
-            src = data_template.format('image/png', data_base64)
-        elif path.lower().endswith('.webp'):
-            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
-            if converter == 'dwebp':
-                debug('loading image from', path)
-                debug('using dwebp to convert WebP image')
-                try:
-                    if sublime.platform() == 'windows':
-                        startupinfo = subprocess.STARTUPINFO()
-                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        data = subprocess.check_output(['dwebp', '-o', '-', '--', path], startupinfo=startupinfo)
-                    else:
-                        data = subprocess.check_output(['dwebp', '-o', '-', '--', path])
-                except Exception as ex:
-                    debug(ex)
-                    return
-            elif converter == 'magick':
-                debug('loading image from', path)
-                debug('using ImageMagick to convert WebP image')
-                try:
-                    if sublime.platform() == 'windows':
-                        startupinfo = subprocess.STARTUPINFO()
-                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        data = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
-                    else:
-                        data = subprocess.check_output(['magick', path, 'png:-'])
-                except Exception as ex:
-                    debug(ex)
-                    return
-            elif converter == '':
-                return
-            else:
-                debug('unknown WebP converter: {}'.format(converter))
-                return
-            width, height = image_size(data)
-            data_base64 = b64encode(data).decode('ascii')
-            src = data_template.format('image/png', data_base64)
-        elif path.lower().endswith('.avif'):
-            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
-            if converter == 'magick':
-                debug('loading image from', path)
-                debug('using ImageMagick to convert AVIF image')
-                try:
-                    if sublime.platform() == 'windows':
-                        startupinfo = subprocess.STARTUPINFO()
-                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        data = subprocess.check_output(['magick', path, 'png:-'], startupinfo=startupinfo)
-                    else:
-                        data = subprocess.check_output(['magick', path, 'png:-'])
-                except Exception as ex:
-                    debug(ex)
-                    return
-            elif converter == '':
-                return
-            else:
-                debug('unknown AVIF converter: {}'.format(converter))
-                return
-            width, height = image_size(data)
-            data_base64 = b64encode(data).decode('ascii')
-            src = data_template.format('image/png', data_base64)
+            src = data_template.format(MimeType.PNG, data_base64)
         else:
             debug('loading image from', path)
-            src = 'file://' + path
             with open(path, 'rb') as data:
                 width, height = image_size(data)
+            src = 'file://' + path
         self.image_popup(view, region, width, height, src)
 
     def web_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
         mime, data = request_img(url)
         if not mime or not data:
             return
-        if mime == 'image/svg+xml':
-            mime = 'image/png'
-            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
-            try:
-                data = svg2png(data, converter)
-            except Exception as ex:
-                debug(ex)
+        image_format = format_from_mime(mime)
+        if image_format in CONVERTABLE_IMAGE_FORMATS:
+            if image_format == ImageFormat.SVG:
+                converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
+            elif image_format == ImageFormat.WEBP:
+                converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
+            elif image_format == ImageFormat.AVIF:
+                converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
+            else:
                 return
-        elif mime == 'image/webp':
-            mime = 'image/png'
-            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
+            mime = MimeType.PNG
             try:
-                data = webp2png(data, converter)
-            except Exception as ex:
-                debug(ex)
-                return
-        elif mime == 'image/avif':
-            mime = 'image/png'
-            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
-            try:
-                data = avif2png(data, converter)
+                data = convert_bytes2png(data, image_format, converter)
             except Exception as ex:
                 debug(ex)
                 return

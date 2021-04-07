@@ -15,6 +15,12 @@ Also try out my [Brackets Color Scheme](https://github.com/jwortmann/brackets-co
 The package can be installed via Sublime Text's package manager [Package Control](https://packagecontrol.io/installation).
 From the command palette select *Package Control: Install Package* and search for *QuickView*.
 
+## Preview
+
+![Image popup](img/image_popup.png)
+
+![Color popup](img/color_popup.png)
+
 ## Features
 
 Hover over an image link or CSS color in a supported syntax to show a preview popup.
@@ -31,9 +37,3 @@ Image previews are possible for the following file formats:
 The SVG, WebP and AVIF formats require an installed image converter and must be activated in the package settings.
 
 Image and color previews can be disabled separately in the package settings.
-
-## Preview
-
-![Image popup](img/image_popup.png)
-
-![Color popup](img/color_popup.png)
