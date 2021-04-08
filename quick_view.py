@@ -63,7 +63,7 @@ quickview_template = '''
             }}
             .border {{
                 padding: {border}rem;
-                border-radius: 0.3rem;
+                border-radius: {border_radius}rem;
                 background-color: var(--bc-panel-bg);
             }}
             .color-swatch {{
@@ -82,7 +82,7 @@ quickview_template = '''
                 color: var(--bc-text);
             }}
         </style>
-        <div class="preview-bubble bubble-above"></div>
+        {bubble}
         <div class="border">{content}</div>
     </body>
 '''
@@ -264,9 +264,12 @@ def image_size_label(width: int, height: int) -> str:
     return '{} \u00d7 {} pixels'.format(width, height) if width != -1 else 'unknown size'
 
 def format_template(view: sublime.View, popup_width: int, content: str) -> str:
+    popup_style = sublime.load_settings(SETTINGS_FILE).get('popup_style')
+    bubble = '<div class="preview-bubble bubble-above"></div>' if 'pointer' in popup_style else ''
+    popup_border_radius = 0.3 if 'rounded' in popup_style else 0
     margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()  # @todo Does this work on high DPI displays? Should maybe better use rem units instead of px here
     popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-    return quickview_template.format(margin=margin, border=popup_border_width, content=content)
+    return quickview_template.format(margin=margin, border=popup_border_width, border_radius=popup_border_radius, bubble=bubble, content=content)
 
 @lru_cache(maxsize=16)
 def request_img(url: str) -> tuple:

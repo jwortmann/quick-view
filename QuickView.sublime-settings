@@ -31,5 +31,12 @@
 
     // The border width of the popups. This might not correspond with actual pixel values,
     // depending on your screen resolution and font size.
-    "popup_border_width": 8
+    "popup_border_width": 8,
+
+    // List of style features for the popup. You can also use an empty array for this setting if
+    // none of the following styles should be applied, which may improve the appearance on Linux
+    // and macOS, where popups are drawn with a subtle shadow by default. Supported options are:
+    //  - "rounded" (draw the border with rounded corners)
+    //  - "pointer" (draw a small pointer triangle on the top border)
+    "popup_style": ["rounded", "pointer"]
 }
