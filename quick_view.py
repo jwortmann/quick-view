@@ -87,7 +87,7 @@ quickview_template = '''
     </body>
 '''
 
-data_template = 'data:{};base64,{}'
+data_uri_template = 'data:{};base64,{}'
 
 class ImageFormat:
     UNSUPPORTED = 0
@@ -385,6 +385,22 @@ def image_size(data) -> tuple:
         debug(ex)
     return width, height
 
+# @see https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
+def parse_data_uri(uri: str) -> tuple:
+    if not uri.startswith('data:') or ',' not in uri:
+        raise ValueError('invalid data uri')
+    media_type, _, raw_data = uri[5:].partition(',')
+    if media_type.endswith(';base64'):
+        media_type = media_type[:-7]
+        data = b64decode(raw_data)
+    else:
+        data = urllib.parse.unquote_to_bytes(raw_data)
+    if not media_type:
+        mime = 'text/plain'
+    else:
+        mime = media_type.split(';')[0]
+    return mime, data
+
 
 class ColorHoverListener(sublime_plugin.ViewEventListener):
     SUPPORTED_SYNTAXES = [
@@ -512,8 +528,8 @@ class ImageHoverListener(sublime_plugin.EventListener):
             url = url[1:]
         if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
             url = url[:-1]
-        if url.lower().startswith('data:'):
-            sublime.set_timeout_async(lambda: self.data_image_popup(view, region, url))
+        if url.startswith('data:'):
+            sublime.set_timeout_async(lambda: self.data_uri_image_popup(view, region, url))
         else:
             image_format = format_from_url(url)
             if image_format == ImageFormat.SVG and settings.get('svg_converter') not in SUPPORTED_CONVERTERS[image_format]:
@@ -526,7 +542,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
                 if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or settings.get('extensionless_image_preview'):
                     sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
             elif image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
-                if url.lower().startswith('file://'):
+                if url.startswith('file://'):
                     url = url[7:]
                 sublime.set_timeout_async(lambda: self.local_image_popup(view, region, url))
 
@@ -540,27 +556,42 @@ class ImageHoverListener(sublime_plugin.EventListener):
             else:
                 return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
 
-    def data_image_popup(self, view: sublime.View, region: sublime.Region, src: str) -> None:
+    def data_uri_image_popup(self, view: sublime.View, region: sublime.Region, data_uri: str) -> None:
         try:
-            _, mime, encoding, data = re.split(r'[:;,]', src.lower(), maxsplit=3)
-        except ValueError:
+            mime, data = parse_data_uri(data_uri)
+        except Exception:
             return
-        # @todo Are WebP or AVIF formats possible here too?
-        if mime in [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP] and encoding == 'base64':
-            data = b64decode(data)
-        elif mime == MimeType.SVG and encoding == 'utf8':
+        if mime == MimeType.SVG:
             converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
             try:
-                data = convert_bytes2png(bytes(data, 'utf-8'), ImageFormat.SVG, converter)
+                data = convert_bytes2png(data, ImageFormat.SVG, converter)
             except Exception as ex:
                 debug(ex)
                 return
             data_base64 = b64encode(data).decode('ascii')
-            src = data_template.format(mime, data_base64)
-        else:
+            data_uri = data_uri_template.format(mime, data_base64)
+        elif mime == MimeType.WEBP:
+            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
+            try:
+                data = convert_bytes2png(data, ImageFormat.WEBP, converter)
+            except Exception as ex:
+                debug(ex)
+                return
+            data_base64 = b64encode(data).decode('ascii')
+            data_uri = data_uri_template.format(mime, data_base64)
+        elif mime == MimeType.AVIF:
+            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
+            try:
+                data = convert_bytes2png(data, ImageFormat.AVIF, converter)
+            except Exception as ex:
+                debug(ex)
+                return
+            data_base64 = b64encode(data).decode('ascii')
+            data_uri = data_uri_template.format(mime, data_base64)
+        elif mime not in [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP]:
             return
         width, height = image_size(data)
-        self.image_popup(view, region, width, height, src)
+        self.image_popup(view, region, width, height, data_uri)
 
     def local_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
         path = self.local_path(view, url)
@@ -584,7 +615,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
                 return
             width, height = image_size(data)
             data_base64 = b64encode(data).decode('ascii')
-            src = data_template.format(MimeType.PNG, data_base64)
+            src = data_uri_template.format(MimeType.PNG, data_base64)
         else:
             debug('loading image from', path)
             with open(path, 'rb') as data:
@@ -614,8 +645,8 @@ class ImageHoverListener(sublime_plugin.EventListener):
                 return
         width, height = image_size(data)
         data_base64 = b64encode(data).decode('ascii')
-        src = data_template.format(mime, data_base64)
-        self.image_popup(view, region, width, height, src)
+        data_uri = data_uri_template.format(mime, data_base64)
+        self.image_popup(view, region, width, height, data_uri)
 
     def image_popup(self, view: sublime.View, region: sublime.Region, width: int, height: int, src: str) -> None:
         device_scale_factor = EM_SCALE_FACTOR * view.em_width()
@@ -625,7 +656,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
         # popup_height = scaled_height + int((2 * popup_border_width + 9) * device_scale_factor)
         label = image_size_label(width, height)
         location = popup_location(view, region, popup_width)
-        img_preview = '<img class="img-preview" src="{}" width="{}" height="{}" /><div class="img-size">{}</div>'.format(src, scaled_width, scaled_height, label)
+        img_preview = '<img src="{}" width="{}" height="{}" /><div class="img-size">{}</div>'.format(src, scaled_width, scaled_height, label)
         content = format_template(view, popup_width, img_preview)
         self.active_region = region
         view.show_popup(content, flags, location, 1024, 1024, None, self.reset_active_region)
