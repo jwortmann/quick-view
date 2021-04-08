@@ -307,15 +307,13 @@ def convert_bytes2png(data: bytes, input_format: int, converter: str) -> bytes:
     elif converter == 'dwebp' and input_format == ImageFormat.WEBP:
         debug('using dwebp to convert WebP image')
         p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
-    elif converter == 'magick' and  input_format == ImageFormat.SVG:
-        debug('using ImageMagick to convert SVG image')
-        p = subprocess.Popen(['magick', '-background', 'transparent', 'svg:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
-    elif converter == 'magick' and input_format == ImageFormat.WEBP:
-        debug('using ImageMagick to convert WebP image')
-        p = subprocess.Popen(['magick', '-background', 'transparent', 'webp:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
-    elif converter == 'magick' and input_format == ImageFormat.AVIF:
-        debug('using ImageMagick to convert AVIF image')
-        p = subprocess.Popen(['magick', '-background', 'transparent', 'avif:-', 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+    elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
+        debug('using ImageMagick to convert', IMAGE_FORMAT_NAMES[input_format], 'image')
+        fmt = {ImageFormat.SVG: 'svg:-', ImageFormat.WEBP: 'webp:-', ImageFormat.AVIF: 'avif:-'}[input_format]
+        if sublime.load_settings(SETTINGS_FILE).get('background_pattern', False):  # @todo Experimental setting: use checkerboard background pattern for images with transparency
+            p = subprocess.Popen(['magick', 'composite', '-compose', 'dst-over', '-tile', 'pattern:checkerboard', '-background', 'transparent', fmt, 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
+        else:
+            p = subprocess.Popen(['magick', '-background', 'transparent', fmt, 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     else:
         raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     png, _ = p.communicate(data)
@@ -336,7 +334,10 @@ def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
         png = subprocess.check_output(['dwebp', '-o', '-', '--', path], startupinfo=startupinfo)
     elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
         debug('using ImageMagick to convert', IMAGE_FORMAT_NAMES[input_format], 'image')
-        png = subprocess.check_output(['magick', '-background', 'transparent', path, 'png:-'], startupinfo=startupinfo)
+        if sublime.load_settings(SETTINGS_FILE).get('background_pattern', False):
+            png = subprocess.check_output(['magick', 'composite', '-compose', 'dst-over', '-tile', 'pattern:checkerboard', '-background', 'transparent', path, 'png:-'], startupinfo=startupinfo)
+        else:
+            png = subprocess.check_output(['magick', '-background', 'transparent', path, 'png:-'], startupinfo=startupinfo)
     else:
         raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     return png
