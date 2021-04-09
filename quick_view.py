@@ -233,16 +233,24 @@ def popup_location(view: sublime.View, region: sublime.Region, popup_width: int)
     """
     ax, ay = view.text_to_layout(region.a)
     bx, _ = view.text_to_layout(region.b)
-    vx = view.viewport_position()[0] + view.viewport_extent()[0] - popup_width  # maximum x-pos so that the popup is still contained within the window
-    lx = ax - popup_width / 2  # minimum x-pos so that the popup still points at the link region
+    view_ax = view.viewport_position()[0]  # minimum x-pos so that the popup is still contained within the view
+    view_bx = view.viewport_position()[0] + view.viewport_extent()[0] - popup_width  # maximum x-pos so that the popup is still contained within the view
+    link_ax = ax - popup_width / 2  # minimum x-pos so that the popup still points at the link region
+    link_bx = bx - popup_width / 2  # maximum x-pos so that the popup still points at the link region
     x = (ax + bx - popup_width) / 2
     horizontal_correction = 0
-    if x > vx:  # restrict popup position to active viewport
-        x = vx
-        horizontal_correction = -1  # shift 1 character to the left to ensure that the popup doesn't hide the window border
-    if x < lx:  # restrict popup position to link
-        x = lx
-        horizontal_correction = 1  # shift 1 character to the right to ensure that the popup doesn't point to the left side of potential string punctuation
+    if x < view_ax:  # restrict popup position to active viewport (left side)
+        x = view_ax
+        horizontal_correction = 1  # shift 1 character to the right to ensure that the popup doesn't hide the left window border
+        if x > link_bx:  # restrict popup position to link
+            x = link_bx
+            horizontal_correction = -1  # shift 1 character to the left to ensure that the popup doesn't point to the right side of potential string punctuation
+    if x > view_bx:  # restrict popup position to active viewport (right side)
+        x = view_bx
+        horizontal_correction = -1  # shift 1 character to the left to ensure that the popup doesn't hide the right window border
+        if x < link_ax:  # restrict popup position to link
+            x = link_ax
+            horizontal_correction = 1  # shift 1 character to the right to ensure that the popup doesn't point to the left side of potential string punctuation
     return view.layout_to_text((x, ay)) + horizontal_correction
 
 def scale_image(width: int, height: int, device_scale_factor: float) -> tuple:
