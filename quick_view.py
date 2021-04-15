@@ -20,6 +20,9 @@ EM_SCALE_FACTOR = 1/8.4  # this means the following pixel values correspond to a
 MIN_POPUP_IMAGE_WIDTH = 100
 MAX_POPUP_IMAGE_WIDTH = 200
 
+BACKGROUND_WHITE_PIXEL = {'light': 255, 'dark': 51}
+BACKGROUND_BLACK_PIXEL = {'light': 204, 'dark': 0}
+
 SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
 
 COLOR_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
@@ -124,42 +127,30 @@ IMAGE_FORMAT_NAMES = {
     ImageFormat.AVIF: 'AVIF'
 }
 
+FILE_EXTENSION_FORMAT_MAP = {
+    '.png': ImageFormat.PNG,
+    '.jpg': ImageFormat.JPEG,
+    '.jpeg': ImageFormat.JPEG,
+    '.gif': ImageFormat.GIF,
+    '.bmp': ImageFormat.BMP,
+    '.svg': ImageFormat.SVG,
+    '.webp': ImageFormat.WEBP,
+    '.avif': ImageFormat.AVIF
+}
+
+MIME_TYPE_FORMAT_MAP = {
+    MimeType.PNG: ImageFormat.PNG,
+    MimeType.JPEG: ImageFormat.JPEG,
+    MimeType.GIF: ImageFormat.GIF,
+    MimeType.BMP: ImageFormat.BMP,
+    MimeType.SVG: ImageFormat.SVG,
+    MimeType.WEBP: ImageFormat.WEBP,
+    MimeType.AVIF: ImageFormat.AVIF
+}
+
 def format_from_url(url: str) -> int:
     _, file_extension = os.path.splitext(url.lower())
-    if file_extension == '.png':
-        return ImageFormat.PNG
-    elif file_extension in ['.jpg', '.jpeg']:
-        return ImageFormat.JPEG
-    elif file_extension == '.gif':
-        return ImageFormat.GIF
-    elif file_extension == '.bmp':
-        return ImageFormat.BMP
-    elif file_extension == '.svg':
-        return ImageFormat.SVG
-    elif file_extension == '.webp':
-        return ImageFormat.WEBP
-    elif file_extension == '.avif':
-        return ImageFormat.AVIF
-    else:
-        return ImageFormat.UNSUPPORTED
-
-def format_from_mime(mime: str) -> int:
-    if mime == MimeType.PNG:
-        return ImageFormat.PNG
-    elif mime == MimeType.JPEG:
-        return ImageFormat.JPEG
-    elif mime == MimeType.GIF:
-        return ImageFormat.GIF
-    elif mime == MimeType.BMP:
-        return ImageFormat.BMP
-    elif mime == MimeType.SVG:
-        return ImageFormat.SVG
-    elif mime == MimeType.WEBP:
-        return ImageFormat.WEBP
-    elif mime == MimeType.AVIF:
-        return ImageFormat.AVIF
-    else:
-        return ImageFormat.UNSUPPORTED
+    return FILE_EXTENSION_FORMAT_MAP[file_extension] if file_extension in FILE_EXTENSION_FORMAT_MAP else ImageFormat.UNSUPPORTED
 
 def debug(*msg) -> None:
     if sublime.load_settings(SETTINGS_FILE).get('debug', False):
@@ -414,159 +405,80 @@ def parse_data_uri(uri: str) -> tuple:
     return mime, data
 
 
-class ColorHoverListener(sublime_plugin.ViewEventListener):
-    SUPPORTED_SYNTAXES = [
-        'CSS.sublime-syntax',
-        'HTML.sublime-syntax',
-        'PHP.sublime-syntax',
-        'LESS.sublime-syntax',
-        'Sass.sublime-syntax',
-        'SCSS.sublime-syntax',
-        'Stylus.tmLanguage',
-        'Sublime Text Color Scheme.sublime-syntax',
-        'Sublime Text Theme.sublime-syntax'
-    ]
-    BACKGROUND_WHITE_PIXEL = {'light': 255, 'dark': 51}
-    BACKGROUND_BLACK_PIXEL = {'light': 204, 'dark': 0}
-    active_region = None
-
-    @classmethod
-    def is_applicable(cls, settings: sublime.Settings) -> bool:
-        active_syntax = settings.get('syntax')
-        for syntax in cls.SUPPORTED_SYNTAXES:
-            if syntax in active_syntax:
-                return True
-        return False
-
-    def on_hover(self, point: int, hover_zone: int) -> None:
-        if not sublime.load_settings(SETTINGS_FILE).get('color_preview'):
-            return
-        if hover_zone != sublime.HOVER_TEXT:
-            return
-        if self.active_region and self.active_region.contains(point):  # prevent flickering on small cursor movements
-            return
-
-        if self.view.match_selector(point, 'support.constant.color.w3c-standard-color-name | support.constant.color.w3c-extended-color-keywords'):
-            region = self.view.word(point)
-            self.rgb_color_swatch(region)
-        elif self.view.match_selector(point, 'constant.other.color.rgb-value - punctuation'):
-            region = self.view.word(point)
-            region.a = region.a - 1
-            self.rgb_color_swatch(region)
-        elif self.view.match_selector(point, 'constant.other.color.rgb-value punctuation.definition.constant'):
-            region = self.view.word(point + 1)
-            region.a = region.a - 1
-            self.rgb_color_swatch(region)
-        elif self.view.match_selector(point, 'constant.other.color.rgba-value - punctuation'):
-            region = self.view.word(point)
-            region.a = region.a - 1
-            r, g, b, a = hex2rgba(self.view.substr(region))
-            self.rgba_color_swatch(region, r, g, b, a)
-        elif self.view.match_selector(point, 'constant.other.color.rgba-value punctuation.definition.constant'):
-            region = self.view.word(point + 1)
-            region.a = region.a - 1
-            r, g, b, a = hex2rgba(self.view.substr(region))
-            self.rgba_color_swatch(region, r, g, b, a)
-        elif self.view.match_selector(point, 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'):
-            line = self.view.line(point)
-            text = self.view.substr(line)
-            # @see https://facelessuser.github.io/coloraide/color/#color-matching
-            for m in COLOR_PATTERN.finditer(text):
-                if m.start() <= point - line.a <= m.end():
-                    mcolor = Color.match(text, start=m.start())
-                    if mcolor is not None:
-                        region = sublime.Region(line.a + mcolor.start, line.a + mcolor.end)  # type: ignore
-                        mcolor.color.convert('srgb', in_place=True)  # type: ignore
-                        r = int(255 * mcolor.color.red)
-                        g = int(255 * mcolor.color.green)
-                        b = int(255 * mcolor.color.blue)
-                        a = mcolor.color.alpha
-                        self.rgba_color_swatch(region, r, g, b, a)
-                    return
-
-    def rgb_color_swatch(self, region: sublime.Region) -> None:
-        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-        popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * self.view.em_width())
-        # popup_height = int((40 + 2 * popup_border_width + 9) * EM_SCALE_FACTOR * self.view.em_width())
-        location = popup_location(self.view, region, popup_width)
-        color_swatch = '<div class="color-swatch" style="background-color: {}"></div>'.format(self.view.substr(region))
-        content = format_template(self.view, popup_width, color_swatch)
-        self.active_region = region
-        self.view.show_popup(content, flags, location, 1024, 1024, None, self.reset_active_region)
-
-    def rgba_color_swatch(self, region: sublime.Region, r: int, g: int, b: int, a: float) -> None:
-        if a == 1.0:
-            self.rgb_color_swatch(region)
-            return
-        _, _, lightness = hex2hsl(self.view.style()['background'])
-        color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # @see https://www.sublimetext.com/docs/minihtml.html#predefined_classes
-        bg_white = self.BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
-        bg_black = self.BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
-        r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
-        r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
-        data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
-        device_scale_factor = EM_SCALE_FACTOR * self.view.em_width()
-        scaled_width = int(40 * device_scale_factor)
-        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-        popup_width = int((40 + 2 * popup_border_width) * device_scale_factor)
-        # popup_height = int((40 + 2 * popup_border_width + 9) * device_scale_factor)
-        location = popup_location(self.view, region, popup_width)
-        color_swatch = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
-        content = format_template(self.view, popup_width, color_swatch)
-        self.active_region = region
-        self.view.show_popup(content, flags, location, 1024, 1024, None, self.reset_active_region)
-
-    def reset_active_region(self):
-        self.active_region = None
+def local_path(view: sublime.View, url: str):
+    if os.path.isabs(url):
+        return url
+    else:
+        file_name = view.file_name()
+        if not file_name:
+            return None
+        else:
+            return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
 
 
-class ImageHoverListener(sublime_plugin.EventListener):
+class QuickViewHoverListener(sublime_plugin.EventListener):
     active_region = None
 
     def on_hover(self, view: sublime.View, point: int, hover_zone: int) -> None:
-        settings = sublime.load_settings(SETTINGS_FILE)
-        if not settings.get('image_preview'):
-            return
         if hover_zone != sublime.HOVER_TEXT:
             return
-        if self.active_region and self.active_region.contains(point):
+        if self.active_region and self.active_region.contains(point):  # prevent flickering on small mouse cursor movements
             return
-        scope_selector = settings.get('image_scope_selector')
-        if not view.match_selector(point, scope_selector):
-            return
-        region = view.extract_scope(point)
-        url = view.substr(region)
-        if view.match_selector(region.a, 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
-            url = url[1:]
-        if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
-            url = url[:-1]
-        if url.startswith('data:'):
-            sublime.set_timeout_async(lambda: self.data_uri_image_popup(view, region, url))
-        else:
-            image_format = format_from_url(url)
-            if image_format == ImageFormat.SVG and settings.get('svg_converter') not in SUPPORTED_CONVERTERS[image_format]:
+        settings = sublime.load_settings(SETTINGS_FILE)
+        if view.match_selector(point, settings.get('image_scope_selector')):
+            if not settings.get('image_preview'):
                 return
-            elif image_format == ImageFormat.WEBP and settings.get('webp_converter') not in SUPPORTED_CONVERTERS[image_format]:
-                return
-            elif image_format == ImageFormat.AVIF and settings.get('avif_converter') not in SUPPORTED_CONVERTERS[image_format]:
-                return
-            if url.lower().startswith(SUPPORTED_PROTOCOLS):
-                if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or settings.get('extensionless_image_preview'):
-                    sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
-            elif image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
-                if url.startswith('file://'):
-                    url = url[7:]
-                sublime.set_timeout_async(lambda: self.local_image_popup(view, region, url))
-
-    def local_path(self, view: sublime.View, url: str):
-        if os.path.isabs(url):
-            return url
-        else:
-            file_name = view.file_name()
-            if not file_name:
-                return None
+            region = view.extract_scope(point)
+            url = view.substr(region)
+            if view.match_selector(region.a, 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
+                url = url[1:]
+            if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
+                url = url[:-1]
+            if url.startswith('data:'):
+                sublime.set_timeout_async(lambda: self.data_uri_image_popup(view, region, url))
             else:
-                return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
+                image_format = format_from_url(url)
+                if image_format == ImageFormat.SVG and settings.get('svg_converter') not in SUPPORTED_CONVERTERS[ImageFormat.SVG]:
+                    return
+                elif image_format == ImageFormat.WEBP and settings.get('webp_converter') not in SUPPORTED_CONVERTERS[ImageFormat.WEBP]:
+                    return
+                elif image_format == ImageFormat.AVIF and settings.get('avif_converter') not in SUPPORTED_CONVERTERS[ImageFormat.AVIF]:
+                    return
+                if url.lower().startswith(SUPPORTED_PROTOCOLS):
+                    if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or settings.get('extensionless_image_preview'):
+                        sublime.set_timeout_async(lambda: self.web_image_popup(view, region, url))
+                elif image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
+                    if url.startswith('file://'):
+                        url = url[7:]
+                    sublime.set_timeout_async(lambda: self.local_image_popup(view, region, url))
+        elif settings.get('color_preview'):
+            if view.match_selector(point, 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword | constant.other.color.rgb-value'):
+                region = view.extract_scope(point)
+                if view.substr(region.b - 1) == ';':
+                    region.b -= 1
+                debug(view.substr(region))
+                self.rgb_color_swatch(view, region)
+            elif view.match_selector(point, 'constant.other.color.rgba-value'):
+                region = view.extract_scope(point)
+                debug(view.substr(region))
+                r, g, b, a = hex2rgba(view.substr(region))
+                self.rgba_color_swatch(view, region, r, g, b, a)
+            elif view.match_selector(point, 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'):
+                line = view.line(point)
+                text = view.substr(line)
+                # @see https://facelessuser.github.io/coloraide/color/#color-matching
+                for m in COLOR_PATTERN.finditer(text):
+                    if m.start() <= point - line.a <= m.end():
+                        mcolor = Color.match(text, start=m.start())
+                        if mcolor is not None:
+                            region = sublime.Region(line.a + mcolor.start, line.a + mcolor.end)  # type: ignore
+                            mcolor.color.convert('srgb', in_place=True)  # type: ignore
+                            r = int(255 * mcolor.color.red)
+                            g = int(255 * mcolor.color.green)
+                            b = int(255 * mcolor.color.blue)
+                            a = mcolor.color.alpha
+                            self.rgba_color_swatch(view, region, r, g, b, a)
+                        return
 
     def data_uri_image_popup(self, view: sublime.View, region: sublime.Region, data_uri: str) -> None:
         try:
@@ -606,7 +518,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
         self.image_popup(view, region, width, height, data_uri)
 
     def local_image_popup(self, view: sublime.View, region: sublime.Region, url: str) -> None:
-        path = self.local_path(view, url)
+        path = local_path(view, url)
         if not path or not os.path.isfile(path):
             return
         image_format = format_from_url(path)
@@ -639,7 +551,7 @@ class ImageHoverListener(sublime_plugin.EventListener):
         mime, data = request_img(url)
         if not mime or not data:
             return
-        image_format = format_from_mime(mime)
+        image_format = MIME_TYPE_FORMAT_MAP[mime] if mime in MIME_TYPE_FORMAT_MAP else ImageFormat.UNSUPPORTED
         if image_format in CONVERTABLE_IMAGE_FORMATS:
             if image_format == ImageFormat.SVG:
                 converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
@@ -665,11 +577,40 @@ class ImageHoverListener(sublime_plugin.EventListener):
         scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
         popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
         popup_width = scaled_width + int(2 * popup_border_width * device_scale_factor)
-        # popup_height = scaled_height + int((2 * popup_border_width + 9) * device_scale_factor)
         label = image_size_label(width, height)
         location = popup_location(view, region, popup_width)
         img_preview = '<img src="{}" width="{}" height="{}" /><div class="img-size">{}</div>'.format(src, scaled_width, scaled_height, label)
         content = format_template(view, popup_width, img_preview)
+        self.active_region = region
+        view.show_popup(content, flags, location, 1024, 1024, None, self.reset_active_region)
+
+    def rgb_color_swatch(self, view: sublime.View, region: sublime.Region) -> None:
+        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
+        popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * view.em_width())
+        location = popup_location(view, region, popup_width)
+        color_swatch = '<div class="color-swatch" style="background-color: {}"></div>'.format(view.substr(region))
+        content = format_template(view, popup_width, color_swatch)
+        self.active_region = region
+        view.show_popup(content, flags, location, 1024, 1024, None, self.reset_active_region)
+
+    def rgba_color_swatch(self, view: sublime.View, region: sublime.Region, r: int, g: int, b: int, a: float) -> None:
+        if a == 1.0:
+            self.rgb_color_swatch(view, region)
+            return
+        _, _, lightness = hex2hsl(view.style()['background'])
+        color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # @see https://www.sublimetext.com/docs/minihtml.html#predefined_classes
+        bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
+        bg_black = BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
+        r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
+        r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
+        data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
+        device_scale_factor = EM_SCALE_FACTOR * view.em_width()
+        scaled_width = int(40 * device_scale_factor)
+        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
+        popup_width = int((40 + 2 * popup_border_width) * device_scale_factor)
+        location = popup_location(view, region, popup_width)
+        color_swatch = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
+        content = format_template(view, popup_width, color_swatch)
         self.active_region = region
         view.show_popup(content, flags, location, 1024, 1024, None, self.reset_active_region)
 
