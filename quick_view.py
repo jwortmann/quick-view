@@ -225,7 +225,7 @@ def popup_location(view: sublime.View, region: sublime.Region, popup_width: int)
     ax, ay = view.text_to_layout(region.a)
     bx, _ = view.text_to_layout(region.b)
     view_ax = view.viewport_position()[0]  # minimum x-pos so that the popup is still contained within the view
-    view_bx = view.viewport_position()[0] + view.viewport_extent()[0] - popup_width  # maximum x-pos so that the popup is still contained within the view
+    view_bx = view_ax + view.viewport_extent()[0] - popup_width  # maximum x-pos so that the popup is still contained within the view
     link_ax = ax - popup_width / 2  # minimum x-pos so that the popup still points at the link region
     link_bx = bx - popup_width / 2  # maximum x-pos so that the popup still points at the link region
     x = (ax + bx - popup_width) / 2
@@ -393,17 +393,9 @@ def parse_data_uri(uri: str) -> tuple:
     if not uri.startswith('data:') or ',' not in uri:
         raise ValueError('invalid data uri')
     media_type, _, raw_data = uri[5:].partition(',')
-    if media_type.endswith(';base64'):
-        media_type = media_type[:-7]
-        data = b64decode(raw_data)
-    else:
-        data = urllib.parse.unquote_to_bytes(raw_data)
-    if not media_type:
-        mime = 'text/plain'
-    else:
-        mime = media_type.split(';')[0]
+    data = b64decode(raw_data) if media_type.endswith(';base64') else urllib.parse.unquote_to_bytes(raw_data)
+    mime = media_type.split(';')[0] if media_type else 'text/plain'
     return mime, data
-
 
 def local_path(view: sublime.View, url: str):
     if os.path.isabs(url):
@@ -483,7 +475,8 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
     def data_uri_image_popup(self, view: sublime.View, region: sublime.Region, data_uri: str) -> None:
         try:
             mime, data = parse_data_uri(data_uri)
-        except Exception:
+        except Exception as ex:
+            debug(ex)
             return
         if mime == MimeType.SVG:
             converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
