@@ -1,5 +1,9 @@
 [
     {
+        "caption": "QuickView: Show Preview",
+        "command": "quick_view"
+    },
+    {
         "caption": "Preferences: QuickView Settings",
         "command": "edit_settings",
         "args": {

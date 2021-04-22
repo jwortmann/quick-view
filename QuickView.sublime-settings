@@ -5,38 +5,40 @@
     // Whether or not to show image previews
     "image_preview": true,
 
-    // Scope selector to define applicable regions where image previews should be enabled
+    // Scope selector to define applicable regions where image previews should be
+    // enabled. The regions should span no more than the actual image link URL or
+    // data URI (possible string quotes at the ends are allowed).
     "image_scope_selector": "meta.tag meta.attribute-with-value string | markup.underline.link.image.markdown | meta.property-value.css meta.function-call string",
 
     // Whether or not to try and show image previews for URLs missing extensions
     // (e.g., https://avatars.githubusercontent.com/u/684879?s=200&v=4)
+    // This setting applies only to mouse hover and is ignored when image previews
+    // are manually invoked from the command palette or a key binding.
     "extensionless_image_preview": false,
 
-    // Image previews for the AVIF file format require an installed image converter program.
-    // The executable of the converter program must be available on the PATH. Supported options are:
+    // Image converter program for the AVIF file format. Supported options are:
     //  - "magick" (ImageMagick)
     "avif_converter": "",
 
-    // Image previews for the SVG file format require an installed image converter program.
-    // The executable of the converter program must be available on the PATH. Supported options are:
+    // Image converter program for the SVG file format. Supported options are:
     //  - "inkscape" (Inkscape)
     //  - "magick" (ImageMagick)
     "svg_converter": "",
 
-    // Image previews for the WebP file format require an installed image converter program.
-    // The executable of the converter program must be available on the PATH. Supported options are:
-    //  - "dwebp" (precompiled WebP utility from https://developers.google.com/speed/webp/docs/precompiled)
+    // Image converter program for the WebP file format. Supported options are:
+    //  - "dwebp" (precompiled WebP decoder from https://developers.google.com/speed/webp/docs/precompiled)
     //  - "magick" (ImageMagick)
     "webp_converter": "",
 
-    // The border width of the popups. This might not correspond with actual pixel values,
-    // depending on your screen resolution and font size.
+    // The border width of the popups. This might not correspond with actual pixel
+    // values, depending on your screen resolution and font size.
     "popup_border_width": 8,
 
-    // List of style features for the popup. You can also use an empty array for this setting if
-    // none of the following styles should be applied, which may improve the appearance on Linux
-    // and macOS, where popups are drawn with a subtle shadow by default. Supported options are:
+    // Popup style features. An empty array for this setting can be used if none of
+    // the following styles should be applied, which may improve the appearance on
+    // Linux and macOS, where popups are drawn with a shadow by default.
+    // Supported options are:
     //  - "rounded" (draw the border with rounded corners)
-    //  - "pointer" (draw a small pointer triangle on the top border)
+    //  - "pointer" (draw a small pointer triangle above the top border)
     "popup_style": ["rounded", "pointer"]
 }
