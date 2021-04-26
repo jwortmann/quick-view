@@ -409,35 +409,43 @@ def local_path(view: sublime.View, url: str):
         else:
             return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
 
-def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.Settings, extensionless_image_preview: bool, on_pre_show_popup, on_hide_popup) -> None:
+def status_message(view: sublime.View, show: bool, msg: str) -> None:
+    if show:
+        view.window().status_message(msg)
+
+def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.Settings, extensionless_image_preview: bool, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     url = view.substr(region)
     if view.match_selector(region.a, 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
         url = url[1:]
     if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
         url = url[:-1]
     if url.startswith('data:'):
-        sublime.set_timeout_async(lambda: data_uri_image_popup(view, region, url, on_pre_show_popup, on_hide_popup))
+        sublime.set_timeout_async(lambda: data_uri_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
     else:
         image_format = format_from_url(url)
         if image_format == ImageFormat.SVG and settings.get('svg_converter') not in SUPPORTED_CONVERTERS[ImageFormat.SVG]:
+            status_message(view, show_errors, 'No valid SVG converter set in the package settings')
             return
         elif image_format == ImageFormat.WEBP and settings.get('webp_converter') not in SUPPORTED_CONVERTERS[ImageFormat.WEBP]:
+            status_message(view, show_errors, 'No valid WebP converter set in the package settings')
             return
         elif image_format == ImageFormat.AVIF and settings.get('avif_converter') not in SUPPORTED_CONVERTERS[ImageFormat.AVIF]:
+            status_message(view, show_errors, 'No valid AVIF converter set in the package settings')
             return
         if url.lower().startswith(SUPPORTED_PROTOCOLS):
             if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or extensionless_image_preview:
-                sublime.set_timeout_async(lambda: web_image_popup(view, region, url, on_pre_show_popup, on_hide_popup))
+                sublime.set_timeout_async(lambda: web_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
         elif image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
             if url.startswith('file://'):
                 url = url[7:]
-            sublime.set_timeout_async(lambda: local_image_popup(view, region, url, on_pre_show_popup, on_hide_popup))
+            sublime.set_timeout_async(lambda: local_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
 
-def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: str, on_pre_show_popup, on_hide_popup) -> None:
+def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     try:
         mime, data = parse_data_uri(data_uri)
     except Exception as ex:
         debug(ex)
+        status_message(view, show_errors, 'QuickView not possible for data URI due to parsing error')
         return
     if mime == MimeType.SVG:
         converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
@@ -445,6 +453,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
             data = convert_bytes2png(data, ImageFormat.SVG, converter)
         except Exception as ex:
             debug(ex)
+            status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from SVG')
             return
         data_base64 = b64encode(data).decode('ascii')
         data_uri = data_uri_template.format(mime, data_base64)
@@ -454,6 +463,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
             data = convert_bytes2png(data, ImageFormat.WEBP, converter)
         except Exception as ex:
             debug(ex)
+            status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from WebP')
             return
         data_base64 = b64encode(data).decode('ascii')
         data_uri = data_uri_template.format(mime, data_base64)
@@ -463,33 +473,30 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
             data = convert_bytes2png(data, ImageFormat.AVIF, converter)
         except Exception as ex:
             debug(ex)
+            status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from AVIF')
             return
         data_base64 = b64encode(data).decode('ascii')
         data_uri = data_uri_template.format(mime, data_base64)
     elif mime not in [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP]:
+        status_message(view, show_errors, 'QuickView not possible for data URI due to unsupported mime type {}'.format(mime))
         return
     width, height = image_size(data)
     image_popup(view, region, width, height, data_uri, on_pre_show_popup, on_hide_popup)
 
-def local_image_popup(view: sublime.View, region: sublime.Region, url: str, on_pre_show_popup, on_hide_popup) -> None:
+def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     path = local_path(view, url)
     if not path or not os.path.isfile(path):
+        status_message(view, show_errors, 'QuickView not possible because file {} was not found'.format(path))
         return
     image_format = format_from_url(path)
     if image_format in CONVERTABLE_IMAGE_FORMATS:
-        if image_format == ImageFormat.SVG:
-            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
-        elif image_format == ImageFormat.WEBP:
-            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
-        elif image_format == ImageFormat.AVIF:
-            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
-        else:
-            return
+        converter = sublime.load_settings(SETTINGS_FILE).get({ImageFormat.SVG: 'svg_converter', ImageFormat.WEBP: 'webp_converter', ImageFormat.AVIF: 'avif_converter'}[image_format])
         debug('loading image from', path)
         try:
             data = convert_file2png(path, image_format, converter)
         except Exception as ex:
             debug(ex)
+            status_message(view, show_errors, 'QuickView not possible for file {} due to image conversion error'.format(path))
             return
         width, height = image_size(data)
         data_base64 = b64encode(data).decode('ascii')
@@ -501,25 +508,20 @@ def local_image_popup(view: sublime.View, region: sublime.Region, url: str, on_p
         src = 'file://' + path
     image_popup(view, region, width, height, src, on_pre_show_popup, on_hide_popup)
 
-def web_image_popup(view: sublime.View, region: sublime.Region, url: str, on_pre_show_popup, on_hide_popup) -> None:
+def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     mime, data = request_img(url)
     if not mime or not data:
+        status_message(view, show_errors, 'QuickView not possible for url {}'.format(url))
         return
     image_format = MIME_TYPE_FORMAT_MAP[mime] if mime in MIME_TYPE_FORMAT_MAP else ImageFormat.UNSUPPORTED
     if image_format in CONVERTABLE_IMAGE_FORMATS:
-        if image_format == ImageFormat.SVG:
-            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
-        elif image_format == ImageFormat.WEBP:
-            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
-        elif image_format == ImageFormat.AVIF:
-            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
-        else:
-            return
+        converter = sublime.load_settings(SETTINGS_FILE).get({ImageFormat.SVG: 'svg_converter', ImageFormat.WEBP: 'webp_converter', ImageFormat.AVIF: 'avif_converter'}[image_format])
         mime = MimeType.PNG
         try:
             data = convert_bytes2png(data, image_format, converter)
         except Exception as ex:
             debug(ex)
+            status_message(view, show_errors, 'QuickView not possible for url {} due to image conversion error'.format(url))
             return
     width, height = image_size(data)
     data_base64 = b64encode(data).decode('ascii')
@@ -552,7 +554,7 @@ def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int
         rgb_color_swatch(view, region, on_pre_show_popup, on_hide_popup)
         return
     _, _, lightness = hex2hsl(view.style()['background'])
-    color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # @see https://www.sublimetext.com/docs/minihtml.html#predefined_classes
+    color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
     bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
     bg_black = BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
     r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
@@ -582,7 +584,7 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
             if not settings.get('image_preview'):
                 return
             region = view.extract_scope(point)
-            image_preview(view, region, settings, settings.get('extensionless_image_preview'), self.set_active_region, self.reset_active_region)
+            image_preview(view, region, settings, settings.get('extensionless_image_preview'), False, self.set_active_region, self.reset_active_region)
         elif settings.get('color_preview'):
             if view.match_selector(point, 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword | constant.other.color.rgb-value'):
                 region = view.extract_scope(point)
@@ -596,7 +598,7 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
             elif view.match_selector(point, 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'):
                 line = view.line(point)
                 text = view.substr(line)
-                # @see https://facelessuser.github.io/coloraide/color/#color-matching
+                # https://facelessuser.github.io/coloraide/color/#color-matching
                 for m in COLOR_FUNCTION_PATTERN.finditer(text):
                     if m.start() <= point - line.a <= m.end():
                         mcolor = Color.match(text, start=m.start())
@@ -641,7 +643,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         settings = sublime.load_settings(SETTINGS_FILE)
         if is_empty_selection and self.view.match_selector(point, settings.get('image_scope_selector')):
             region = self.view.extract_scope(point)
-            image_preview(self.view, region, settings, True, self.set_popup_active, self.set_popup_inactive)  # @todo should show a message in the status bar if not successful
+            image_preview(self.view, region, settings, True, True, self.set_popup_active, self.set_popup_inactive)
             return
         else:
             text = self.view.substr(region)
@@ -650,7 +652,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
                 if not is_empty_selection or m.start() <= point - offset <= m.end():
                     link_region = sublime.Region(offset + m.start(), offset + m.end())
                     debug('potential image link', self.view.substr(link_region))
-                    image_preview(self.view, link_region, settings, True, self.set_popup_active, self.set_popup_inactive)  # @todo should show a message in the status bar if not successful
+                    image_preview(self.view, link_region, settings, True, True, self.set_popup_active, self.set_popup_inactive)
                     return
                 else:
                     break

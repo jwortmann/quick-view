@@ -35,4 +35,4 @@ Image previews are possible for the following file formats:
 The SVG, WebP and AVIF formats require an installed image converter program available in the PATH and must be activated in the package settings.
 
 Image and color previews for the current cursor position or selection can also be invoked from the command palette or by adding a [key binding](https://www.sublimetext.com/docs/key_bindings.html) for the `quick_view` command.
-In this case, preview popups are possible for images and colors in plain text as well, and they are attempted to be shown even if image or color previews are disabled in the settings.
+When invoked this way, preview popups are also possible for images and colors in plain text and they are attempted to be shown even if the preview on hover for images or colors is disabled in the settings.
