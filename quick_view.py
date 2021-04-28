@@ -570,6 +570,41 @@ def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int
     on_pre_show_popup(region)
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
+def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    custom_property_name = view.substr(region)
+    definition_regions = [region for region in view.find_by_selector('meta.property-name support.type.custom-property.css') if view.substr(region) == custom_property_name]
+    # only proceed if there is exactly 1 definition for the custom property, because this implementation is
+    # not aware of its scope or possible inheritance due to the HTML structure
+    if len(definition_regions) == 0:
+        status_message(view, show_errors, 'QuickView not possible because no definition found for custom property {}'.format(custom_property_name))
+        return
+    elif len(definition_regions) > 1:
+        status_message(view, show_errors, 'QuickView not possible because more than one definition found for custom property {}'.format(custom_property_name))
+        return
+    # extract next token
+    a = view.find('\S', definition_regions[0].b).a
+    msg = 'QuickView not possible because no valid color could be identified for custom property {}'.format(custom_property_name)
+    if view.substr(a) != ':':
+        status_message(view, show_errors, msg)
+        return
+    a += 1
+    b = view.find_by_class(definition_regions[0].b, forward=True, classes=sublime.CLASS_LINE_END)
+    if a >= b:
+        status_message(view, show_errors, msg)
+        return
+    value_region = sublime.Region(a, b)
+    text = re.split('[;}]', view.substr(value_region))[0].strip()
+    mcolor = Color.match(text, fullmatch=True)  # fullmatch=True ensures that the custom property is only a color
+    if mcolor is not None:
+        mcolor.color.convert('srgb', in_place=True)  # type: ignore
+        r = int(255 * mcolor.color.red)
+        g = int(255 * mcolor.color.green)
+        b = int(255 * mcolor.color.blue)
+        a = mcolor.color.alpha
+        rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
+        return
+    status_message(view, show_errors, msg)
+
 
 class QuickViewHoverListener(sublime_plugin.EventListener):
     active_region = None
@@ -596,6 +631,9 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
                 region = view.extract_scope(point)
                 r, g, b, a = hex2rgba(view.substr(region))
                 rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
+            elif view.match_selector(point, 'meta.property-value support.type.custom-property.css'):
+                region = view.extract_scope(point)
+                css_custom_property_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'):
                 line = view.line(point)
                 text = view.substr(line)
@@ -645,6 +683,10 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         if is_empty_selection and self.view.match_selector(point, settings.get('image_scope_selector')):
             region = self.view.extract_scope(point)
             image_preview(self.view, region, settings, True, True, self.set_popup_active, self.set_popup_inactive)
+            return
+        elif is_empty_selection and self.view.match_selector(point, 'meta.property-value support.type.custom-property.css'):
+            region = self.view.extract_scope(point)
+            css_custom_property_color_swatch(self.view, region, True, self.set_popup_active, self.set_popup_inactive)
             return
         else:
             text = self.view.substr(region)
