@@ -586,10 +586,11 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
             region = view.extract_scope(point)
             image_preview(view, region, settings, settings.get('extensionless_image_preview'), False, self.set_active_region, self.reset_active_region)
         elif settings.get('color_preview'):
-            if view.match_selector(point, 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword | constant.other.color.rgb-value'):
+            if view.match_selector(point, 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword'):
+                region = view.word(point)
+                rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
+            elif view.match_selector(point, 'constant.other.color.rgb-value'):
                 region = view.extract_scope(point)
-                if view.substr(region.b - 1) == ';':
-                    region.b -= 1
                 rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, 'constant.other.color.rgba-value'):
                 region = view.extract_scope(point)
