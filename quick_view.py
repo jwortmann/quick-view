@@ -550,9 +550,9 @@ def rgb_color_swatch(view: sublime.View, region: sublime.Region, on_pre_show_pop
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
 def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int, b: int, a: float, on_pre_show_popup, on_hide_popup) -> None:
-    if a == 1.0:
-        rgb_color_swatch(view, region, on_pre_show_popup, on_hide_popup)
-        return
+    # if a == 1.0:
+    #     rgb_color_swatch(view, region, on_pre_show_popup, on_hide_popup)  # this doesn't work if the color format is not supported by minihtml
+    #     return
     _, _, lightness = hex2hsl(view.style()['background'])
     color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
     bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
