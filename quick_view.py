@@ -550,22 +550,22 @@ def rgb_color_swatch(view: sublime.View, region: sublime.Region, on_pre_show_pop
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
 def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int, b: int, a: float, on_pre_show_popup, on_hide_popup) -> None:
-    # if a == 1.0:
-    #     rgb_color_swatch(view, region, on_pre_show_popup, on_hide_popup)  # this doesn't work if the color format is not supported by minihtml
-    #     return
-    _, _, lightness = hex2hsl(view.style()['background'])
-    color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
-    bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
-    bg_black = BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
-    r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
-    r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
-    data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
-    device_scale_factor = EM_SCALE_FACTOR * view.em_width()
-    scaled_width = int(40 * device_scale_factor)
     popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
+    device_scale_factor = EM_SCALE_FACTOR * view.em_width()
     popup_width = int((40 + 2 * popup_border_width) * device_scale_factor)
     location = popup_location(view, region, popup_width)
-    color_swatch = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
+    if a == 1.0:
+        color_swatch = '<div class="color-swatch" style="background-color: rgb({}, {}, {})"></div>'.format(r, g, b)
+    else:
+        _, _, lightness = hex2hsl(view.style()['background'])
+        color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
+        bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
+        bg_black = BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
+        r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
+        r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
+        data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
+        scaled_width = int(40 * device_scale_factor)
+        color_swatch = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
     content = format_template(view, popup_width, color_swatch)
     on_pre_show_popup(region)
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
@@ -574,7 +574,7 @@ def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region,
     custom_property_name = view.substr(region)
     definition_regions = [region for region in view.find_by_selector('meta.property-name support.type.custom-property.css') if view.substr(region) == custom_property_name]
     # only proceed if there is exactly 1 definition for the custom property, because this implementation is
-    # not aware of its scope or possible inheritance due to the HTML structure
+    # not aware of CSS rule scopes or possible inheritance resulting from the HTML structure
     if len(definition_regions) == 0:
         status_message(view, show_errors, 'QuickView not possible because no definition found for custom property {}'.format(custom_property_name))
         return
@@ -582,7 +582,7 @@ def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region,
         status_message(view, show_errors, 'QuickView not possible because more than one definition found for custom property {}'.format(custom_property_name))
         return
     # extract next token
-    a = view.find('\S', definition_regions[0].b).a
+    a = view.find(r'\S', definition_regions[0].b).a
     msg = 'QuickView not possible because no valid color could be identified for custom property {}'.format(custom_property_name)
     if view.substr(a) != ':':
         status_message(view, show_errors, msg)
