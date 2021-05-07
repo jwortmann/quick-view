@@ -30,14 +30,13 @@
     //  - "magick" (ImageMagick)
     "webp_converter": "",
 
-    // The border width of the popups. This might not correspond with actual pixel
-    // values, depending on your screen resolution and font size.
+    // The border width of the popups. This does not necessarily correspond with
+    // actual pixel values, depending on your screen resolution and font size.
     "popup_border_width": 8,
 
     // Popup style configuration. An empty array for this setting can be used if
     // none of the following styles should be applied, e.g. for an improved
-    // appearance if popup shadows are enabled.
-    // Supported options are:
+    // appearance if popup shadows are enabled. Supported options are:
     //  - "rounded" (draw the border with rounded corners)
     //  - "pointer" (draw a small pointer triangle above the top border)
     "popup_style": ["rounded", "pointer"]

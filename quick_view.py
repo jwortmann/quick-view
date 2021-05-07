@@ -25,6 +25,14 @@ BACKGROUND_BLACK_PIXEL = {'light': 204, 'dark': 0}
 
 SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
 
+SCOPE_SELECTOR_CSS_COLORNAME = 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword'  # default CSS syntax on ST3 and ST4
+SCOPE_SELECTOR_CSS_RGB_LITERAL = 'constant.other.color.rgb-value'  # default CSS syntax
+SCOPE_SELECTOR_CSS_RGBA_LITERAL = 'constant.other.color.rgba-value'  # default CSS syntax
+SCOPE_SELECTOR_CSS_COLOR_FUNCTION = 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'  # default CSS syntax & PackageDev .sublime-color-scheme syntax
+SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_DEFINITION = 'meta.property-name support.type.custom-property.css'  # default CSS syntax
+SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE = 'meta.property-value support.type.custom-property.css'  # default CSS syntax
+SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE = 'meta.color.sublime-color-scheme meta.function-call.var variable.other'  # PackageDev .sublime-color-scheme syntax
+
 COLOR_START_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\(|\b(?<![-#&$])[\w]{3,}(?![(-])\b|(?<![&])#)')
 COLOR_FUNCTION_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
 IMAGE_LINK_PATTERN = re.compile(r'\bdata:image/(?:png|jpeg|gif|png|svg\+xml|webp|avif)(;base64)?,[A-Za-z0-9+/=]+|\bhttps?://[A-Za-z0-9\-\._~:/?#\[\]@!$&\'()*+,;%=]+\b|(?:[A-Za-z]:)?[^\s:*?"<>|]+\.(?:png|jpg|jpeg|gif|bmp|svg|webp|avif)\b')
@@ -219,7 +227,7 @@ def checkerboard_png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> st
 
 def popup_location(view: sublime.View, region: sublime.Region, popup_width: int) -> int:
     """
-    calculate popup location such that:
+    Calculate popup location such that:
     - the popup points the region
     - the popup is fully contained within the view and doesn't overlap with the window border, unless this contradicts with the previous rule
     - the popup points to the center of the region, unless this contradicts with the previous rule
@@ -248,7 +256,7 @@ def popup_location(view: sublime.View, region: sublime.Region, popup_width: int)
 
 def scale_image(width: int, height: int, device_scale_factor: float) -> tuple:
     """
-    scale image such that:
+    Scale image such that:
     - aspect ratio gets preserved
     - resulting image width is at least MIN_POPUP_IMAGE_WIDTH
     - none of resulting image width and height is larger than MAX_POPUP_IMAGE_WIDTH, unless this contradicts with the previous rule
@@ -571,8 +579,11 @@ def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
 def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    """
+    Display preview for custom properties (variables) in CSS
+    """
     custom_property_name = view.substr(region)
-    definition_regions = [region for region in view.find_by_selector('meta.property-name support.type.custom-property.css') if view.substr(region) == custom_property_name]
+    definition_regions = [region for region in view.find_by_selector(SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_DEFINITION) if view.substr(region) == custom_property_name]
     # only proceed if there is exactly 1 definition for the custom property, because this implementation is
     # not aware of CSS rule scopes or possible inheritance resulting from the HTML structure
     if len(definition_regions) == 0:
@@ -605,6 +616,41 @@ def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region,
         return
     status_message(view, show_errors, msg)
 
+def sublime_variable_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    """
+    Display preview for color variables in Sublime resource files (JSON)
+    """
+    filename = view.file_name()
+    variable_name = view.substr(region)
+    value = None
+    if filename:  # search for variable also in overridden files
+        for resource in sublime.find_resources(os.path.basename(filename)):
+            try:
+                is_current_view = os.path.samefile(filename, os.path.join(os.path.dirname(sublime.packages_path()), resource))
+                content = sublime.decode_value(view.substr(sublime.Region(0, view.size()))) if is_current_view else sublime.decode_value(sublime.load_resource(resource))
+                if 'variables' in content and variable_name in content['variables']:
+                    value = content['variables'][variable_name]
+            except:
+                pass
+    else:  # search for variable only in current view
+        try:
+            content = sublime.decode_value(view.substr(sublime.Region(0, view.size())))
+            if 'variables' in content and variable_name in content['variables']:
+                value = content['variables'][variable_name]
+        except:  # @todo Try to resolve variable via scopes like in CSS
+            pass
+    if value:
+        mcolor = Color.match(value, fullmatch=True)  # @todo Also support minihtml color() mod function
+        if mcolor is not None:
+            mcolor.color.convert('srgb', in_place=True)  # type: ignore
+            r = int(255 * mcolor.color.red)
+            g = int(255 * mcolor.color.green)
+            b = int(255 * mcolor.color.blue)
+            a = mcolor.color.alpha
+            rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
+            return
+    status_message(view, show_errors, 'QuickView not possible because no valid color could be identified for variable {}'.format(variable_name))
+
 
 class QuickViewHoverListener(sublime_plugin.EventListener):
     active_region = None
@@ -621,20 +667,24 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
             region = view.extract_scope(point)
             image_preview(view, region, settings, settings.get('extensionless_image_preview'), False, self.set_active_region, self.reset_active_region)
         elif settings.get('color_preview'):
-            if view.match_selector(point, 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword'):
+            if view.match_selector(point, SCOPE_SELECTOR_CSS_COLORNAME):
                 region = view.word(point)
                 rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, 'constant.other.color.rgb-value'):
+            elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGB_LITERAL):
                 region = view.extract_scope(point)
                 rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, 'constant.other.color.rgba-value'):
+            elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGBA_LITERAL):
                 region = view.extract_scope(point)
                 r, g, b, a = hex2rgba(view.substr(region))
                 rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, 'meta.property-value support.type.custom-property.css'):
+            elif view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
                 region = view.extract_scope(point)
                 css_custom_property_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'):
+            elif view.match_selector(point, SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE):
+                region = view.extract_scope(point)
+                sublime_variable_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
+            # for now color variables from themes are not supported, because they can use legacy color syntax and it would be required to resolve 'extends' for themes
+            elif view.match_selector(point, SCOPE_SELECTOR_CSS_COLOR_FUNCTION):
                 line = view.line(point)
                 text = view.substr(line)
                 # https://facelessuser.github.io/coloraide/color/#color-matching
@@ -684,9 +734,13 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             region = self.view.extract_scope(point)
             image_preview(self.view, region, settings, True, True, self.set_popup_active, self.set_popup_inactive)
             return
-        elif is_empty_selection and self.view.match_selector(point, 'meta.property-value support.type.custom-property.css'):
+        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
             region = self.view.extract_scope(point)
             css_custom_property_color_swatch(self.view, region, True, self.set_popup_active, self.set_popup_inactive)
+            return
+        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE):
+            region = self.view.extract_scope(point)
+            sublime_variable_color_swatch(self.view, region, True, self.set_popup_active, self.set_popup_inactive)
             return
         else:
             text = self.view.substr(region)
@@ -713,8 +767,8 @@ class QuickViewCommand(sublime_plugin.TextCommand):
                         return
                 else:
                     break
-        msg = 'QuickView not possible at current cursor position' if is_empty_selection else 'QuickView not available for selection "{}"'.format(text)
-        self.view.window().status_message(msg)
+            msg = 'QuickView not possible at current cursor position' if is_empty_selection else 'QuickView not available for selection "{}"'.format(text)
+            self.view.window().status_message(msg)
 
     def set_popup_active(self, region: sublime.Region) -> None:
         self.popup_active = True
