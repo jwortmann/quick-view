@@ -622,18 +622,20 @@ def sublime_variable_color_swatch(view: sublime.View, region: sublime.Region, sh
     variable_name = view.substr(region)
     value = None
     if filename:  # search for variable also in overridden files
+        data_path = os.path.dirname(sublime.packages_path())
         for resource in sublime.find_resources(os.path.basename(filename)):
             try:
-                is_current_view = os.path.samefile(filename, os.path.join(os.path.dirname(sublime.packages_path()), resource))
+                is_current_view = os.path.samefile(filename, os.path.join(data_path, resource))
+                # use buffer content for current view, because there can be unsaved changes
                 content = sublime.decode_value(view.substr(sublime.Region(0, view.size()))) if is_current_view else sublime.decode_value(sublime.load_resource(resource))
-                if 'variables' in content and variable_name in content['variables']:
+                if isinstance(content, dict) and isinstance(content.get('variables'), dict) and isinstance(content['variables'].get(variable_name), str):
                     value = content['variables'][variable_name]
             except:
                 pass
     else:  # search for variable only in current view
         try:
             content = sublime.decode_value(view.substr(sublime.Region(0, view.size())))
-            if 'variables' in content and variable_name in content['variables']:
+            if isinstance(content, dict) and isinstance(content.get('variables'), dict) and isinstance(content['variables'].get(variable_name), str):
                 value = content['variables'][variable_name]
         except:  # @todo Try to resolve variable via scopes like in CSS
             pass
