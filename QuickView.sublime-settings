@@ -7,7 +7,7 @@
 
     // Scope selector to define applicable regions where image previews should be
     // enabled. The regions should span no more than the actual image link URL or
-    // data URI (possible string quotes at the ends are allowed).
+    // data URI (possible string quotes at the begin and end are allowed).
     "image_scope_selector": "meta.tag meta.attribute-with-value string | markup.underline.link.image.markdown | meta.property-value.css meta.function-call string",
 
     // Whether or not to try and show image previews for URLs missing extensions
