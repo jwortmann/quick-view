@@ -1,4 +1,5 @@
 import io
+import logging  # logging.basicConfig(level=logging.DEBUG)
 import os
 import re
 import struct
@@ -35,7 +36,7 @@ SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE = 'meta.color.sublime-col
 
 COLOR_START_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\(|\b(?<![-#&$])[\w]{3,}(?![(-])\b|(?<![&])#)')
 COLOR_FUNCTION_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
-IMAGE_LINK_PATTERN = re.compile(r'\bdata:image/(?:png|jpeg|gif|png|svg\+xml|webp|avif)(;base64)?,[A-Za-z0-9+/=]+|\bhttps?://[A-Za-z0-9\-\._~:/?#\[\]@!$&\'()*+,;%=]+\b|(?:[A-Za-z]:)?[^\s:*?"<>|]+\.(?:png|jpg|jpeg|gif|bmp|svg|webp|avif)\b')
+IMAGE_URI_PATTERN = re.compile(r'\bdata:image/(?:png|jpeg|gif|png|svg\+xml|webp|avif)(;base64)?,[A-Za-z0-9+/=]+|\bhttps?://[A-Za-z0-9\-\._~:/?#\[\]@!$&\'()*+,;%=]+\b|(?:[A-Za-z]:)?[^\s:*?"<>|]+\.(?:png|jpg|jpeg|gif|bmp|svg|webp|avif)\b')
 
 POPUP_FLAGS = sublime.HIDE_ON_MOUSE_MOVE_AWAY
 
@@ -162,10 +163,6 @@ def format_from_url(url: str) -> int:
     _, file_extension = os.path.splitext(url.lower())
     return FILE_EXTENSION_FORMAT_MAP[file_extension] if file_extension in FILE_EXTENSION_FORMAT_MAP else ImageFormat.UNSUPPORTED
 
-def debug(*msg) -> None:
-    if sublime.load_settings(SETTINGS_FILE).get('debug', False):
-        print('QuickView:', *msg)
-
 def hex2rgba(color: str) -> tuple:
     if len(color) == 5:
         r = int(color[1] * 2, 16)
@@ -283,7 +280,7 @@ def format_template(view: sublime.View, popup_width: int, content: str) -> str:
 @lru_cache(maxsize=16)
 def request_img(url: str) -> tuple:
     try:
-        debug('requesting image from', url)
+        logging.debug('requesting image from %s', url)
         with urllib.request.urlopen(url, timeout=2) as response:
             length = response.headers.get('content-length')
             if length is None:
@@ -300,10 +297,10 @@ def request_img(url: str) -> tuple:
             data = response.read()
             return mime, data
     except timeout:
-        debug('timeout for url', url)
+        logging.debug('timeout for url %s', url)
         return None, None
     except Exception as ex:
-        debug(ex, 'for url', url)
+        logging.debug(ex)
         return None, None
 
 @lru_cache(maxsize=16)
@@ -314,13 +311,13 @@ def convert_bytes2png(data: bytes, input_format: int, converter: str) -> bytes:
     else:
         startupinfo = None
     if converter == 'inkscape' and input_format == ImageFormat.SVG:
-        debug('using Inkscape to convert SVG image')
+        logging.debug('using Inkscape to convert SVG image')
         p = subprocess.Popen(['inkscape', '--pipe', '--export-type=png'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     elif converter == 'dwebp' and input_format == ImageFormat.WEBP:
-        debug('using dwebp to convert WebP image')
+        logging.debug('using dwebp to convert WebP image')
         p = subprocess.Popen(['dwebp', '-o', '-', '--', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
     elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
-        debug('using ImageMagick to convert', IMAGE_FORMAT_NAMES[input_format], 'image')
+        logging.debug('using ImageMagick to convert %s image', IMAGE_FORMAT_NAMES[input_format])
         fmt = {ImageFormat.SVG: 'svg:-', ImageFormat.WEBP: 'webp:-', ImageFormat.AVIF: 'avif:-'}[input_format]
         if sublime.load_settings(SETTINGS_FILE).get('background_pattern', False):  # @todo Experimental setting: use checkerboard background pattern for images with transparency
             p = subprocess.Popen(['magick', 'composite', '-compose', 'dst-over', '-tile', 'pattern:checkerboard', '-background', 'transparent', fmt, 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
@@ -339,13 +336,13 @@ def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
     else:
         startupinfo = None
     if converter == 'inkscape' and input_format == ImageFormat.SVG:
-        debug('using Inkscape to convert SVG image')
+        logging.debug('using Inkscape to convert SVG image')
         png = subprocess.check_output(['inkscape', '--export-type=png', '--export-filename=-', path], startupinfo=startupinfo)
     elif converter == 'dwebp' and input_format == ImageFormat.WEBP:
-        debug('using dwebp to convert WebP image')
+        logging.debug('using dwebp to convert WebP image')
         png = subprocess.check_output(['dwebp', '-o', '-', '--', path], startupinfo=startupinfo)
     elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
-        debug('using ImageMagick to convert', IMAGE_FORMAT_NAMES[input_format], 'image')
+        logging.debug('using ImageMagick to convert %s image', IMAGE_FORMAT_NAMES[input_format])
         if sublime.load_settings(SETTINGS_FILE).get('background_pattern', False):
             png = subprocess.check_output(['magick', 'composite', '-compose', 'dst-over', '-tile', 'pattern:checkerboard', '-background', 'transparent', path, 'png:-'], startupinfo=startupinfo)
         else:
@@ -395,7 +392,7 @@ def image_size(data) -> tuple:
             else:
                 raise ValueError('unknown DIB header size: ' + str(headerSize))
     except Exception as ex:
-        debug(ex)
+        logging.debug(ex)
     return width, height
 
 # @see https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
@@ -452,7 +449,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
     try:
         mime, data = parse_data_uri(data_uri)
     except Exception as ex:
-        debug(ex)
+        logging.debug(ex)
         status_message(view, show_errors, 'QuickView not possible for data URI due to parsing error')
         return
     if mime == MimeType.SVG:
@@ -460,7 +457,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
         try:
             data = convert_bytes2png(data, ImageFormat.SVG, converter)
         except Exception as ex:
-            debug(ex)
+            logging.debug(ex)
             status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from SVG')
             return
         data_base64 = b64encode(data).decode('ascii')
@@ -470,7 +467,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
         try:
             data = convert_bytes2png(data, ImageFormat.WEBP, converter)
         except Exception as ex:
-            debug(ex)
+            logging.debug(ex)
             status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from WebP')
             return
         data_base64 = b64encode(data).decode('ascii')
@@ -480,7 +477,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
         try:
             data = convert_bytes2png(data, ImageFormat.AVIF, converter)
         except Exception as ex:
-            debug(ex)
+            logging.debug(ex)
             status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from AVIF')
             return
         data_base64 = b64encode(data).decode('ascii')
@@ -499,24 +496,25 @@ def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show
     image_format = format_from_url(path)
     if image_format in CONVERTABLE_IMAGE_FORMATS:
         converter = sublime.load_settings(SETTINGS_FILE).get({ImageFormat.SVG: 'svg_converter', ImageFormat.WEBP: 'webp_converter', ImageFormat.AVIF: 'avif_converter'}[image_format])
-        debug('loading image from', path)
+        logging.debug('loading local image from %s', path)
         try:
             data = convert_file2png(path, image_format, converter)
         except Exception as ex:
-            debug(ex)
+            logging.debug(ex)
             status_message(view, show_errors, 'QuickView not possible for file {} due to image conversion error'.format(path))
             return
         width, height = image_size(data)
         data_base64 = b64encode(data).decode('ascii')
         src = data_uri_template.format(MimeType.PNG, data_base64)
     else:
-        debug('loading image from', path)
+        logging.debug('loading local image from %s', path)
         with open(path, 'rb') as data:
             width, height = image_size(data)
         src = 'file://' + path
     image_popup(view, region, width, height, src, on_pre_show_popup, on_hide_popup)
 
 def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    logging.debug('potential image URL: %s', url)
     mime, data = request_img(url)
     if not mime or not data:
         status_message(view, show_errors, 'QuickView not possible for url {}'.format(url))
@@ -528,7 +526,7 @@ def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_e
         try:
             data = convert_bytes2png(data, image_format, converter)
         except Exception as ex:
-            debug(ex)
+            logging.debug(ex)
             status_message(view, show_errors, 'QuickView not possible for url {} due to image conversion error'.format(url))
             return
     width, height = image_size(data)
@@ -717,9 +715,9 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             return
         selections = self.view.sel()
         if not selections:
-            debug('no selections in the active view')
+            self.view.window().status_message('No selections in the active view')
             return
-        region = selections[0]  # in case of multiple cursors only the first one is used, because there can only be a single popup be visible at a time
+        region = selections[0]  # in case of multiple cursors only the first one is used, because there can only a single popup be visible at a time
         is_empty_selection = region.empty()
         if is_empty_selection:
             point = region.b
@@ -745,10 +743,10 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         else:
             text = self.view.substr(region)
             offset = region.begin()
-            for m in IMAGE_LINK_PATTERN.finditer(text):
+            for m in IMAGE_URI_PATTERN.finditer(text):
                 if not is_empty_selection or m.start() <= point - offset <= m.end():
                     link_region = sublime.Region(offset + m.start(), offset + m.end())
-                    debug('potential image link', self.view.substr(link_region))
+                    logging.debug('potential image URI found: %s', self.view.substr(link_region))
                     image_preview(self.view, link_region, settings, True, True, self.set_popup_active, self.set_popup_inactive)
                     return
                 else:
