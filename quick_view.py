@@ -160,16 +160,23 @@ MIME_TYPE_FORMAT_MAP = {
 }
 
 def format_from_url(url: str) -> int:
+    """
+    Returns the image format for a given URL string based on its file extension
+    """
     _, file_extension = os.path.splitext(url.lower())
-    return FILE_EXTENSION_FORMAT_MAP[file_extension] if file_extension in FILE_EXTENSION_FORMAT_MAP else ImageFormat.UNSUPPORTED
+    return FILE_EXTENSION_FORMAT_MAP.get(file_extension) or ImageFormat.UNSUPPORTED
 
 def hex2rgba(color: str) -> tuple:
-    if len(color) == 5:
+    """
+    Convert 4-digit or 8-digit RGBA hex-color string into R, G, B, A tuple with
+    integer values 0..255 for R, G, B and floating point value [0, 1] for A
+    """
+    if len(color) == 5:  # 4-digit RGBA hex-color
         r = int(color[1] * 2, 16)
         g = int(color[2] * 2, 16)
         b = int(color[3] * 2, 16)
         a = int(color[4] * 2, 16) / 255
-    elif len(color) == 9:
+    elif len(color) == 9:  # 8-digit RGBA hex-color
         r = int(color[1:3], 16)
         g = int(color[3:5], 16)
         b = int(color[5:7], 16)
@@ -179,6 +186,9 @@ def hex2rgba(color: str) -> tuple:
     return r, g, b, a
 
 def hex2hsl(color: str) -> tuple:
+    """
+    Convert 6-digit RGB hex-color string into H, S, L tuple
+    """
     r = int(color[1:3], 16) / 255
     g = int(color[3:5], 16) / 255
     b = int(color[5:7], 16) / 255
@@ -201,6 +211,12 @@ def hex2hsl(color: str) -> tuple:
 
 @lru_cache(maxsize=128)
 def checkerboard_png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> str:
+    """
+    Generate a base64 encoded PNG image with sidelength 40px of a checkerboard pattern with
+    color rgb(r1, g1, b1) for the light pixels and color rgb(r2, g2, b2) for the dark pixels.
+    The result for given input values is cached to avoid unnecessary calculations for the
+    same input values.
+    """
     pixels = list()
     row_type1 = list()
     row_type2 = list()
@@ -352,6 +368,9 @@ def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
     return png
 
 def image_size(data) -> tuple:
+    """
+    Extract image width and height from the file header
+    """
     width = -1
     height = -1
     if isinstance(data, bytes):
@@ -415,6 +434,12 @@ def local_path(view: sublime.View, url: str):
             return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
 
 def status_message(view: sublime.View, show: bool, msg: str) -> None:
+    """
+    Show a message in the status bar, but only if the parameter `show` is True.
+    This allows to reuse the same functions, but only show potential error messages
+    if preview popups are invoked from the command palette or a keybinding, but not
+    on mouse hover.
+    """
     if show:
         view.window().status_message(msg)
 
@@ -446,6 +471,9 @@ def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.
             sublime.set_timeout_async(lambda: local_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
 
 def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    """
+    Show an image popup for a data URI
+    """
     try:
         mime, data = parse_data_uri(data_uri)
     except Exception as ex:
@@ -489,6 +517,9 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
     image_popup(view, region, width, height, data_uri, on_pre_show_popup, on_hide_popup)
 
 def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    """
+    Show an image popup for a local file with absolute or relative file path
+    """
     path = local_path(view, url)
     if not path or not os.path.isfile(path):
         status_message(view, show_errors, 'QuickView not possible because file {} was not found'.format(path))
@@ -514,6 +545,9 @@ def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show
     image_popup(view, region, width, height, src, on_pre_show_popup, on_hide_popup)
 
 def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    """
+    Show an image popup for a internet URL
+    """
     logging.debug('potential image URL: %s', url)
     mime, data = request_img(url)
     if not mime or not data:
