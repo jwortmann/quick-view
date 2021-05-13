@@ -715,11 +715,11 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         if self.popup_active:
             self.view.hide_popup()
             return
-        selections = self.view.sel()
-        if not selections:
-            self.view.window().status_message('No selections in the active view')
+        try:
+            region = self.view.sel()[0]  # in case of multiple cursors only the first one is used, because there can only a single popup be visible at a time
+        except IndexError:
+            logging.error('No selections in the active view')
             return
-        region = selections[0]  # in case of multiple cursors only the first one is used, because there can only a single popup be visible at a time
         is_empty_selection = region.empty()
         if is_empty_selection:
             point = region.b

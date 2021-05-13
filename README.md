@@ -4,9 +4,9 @@
 [![Version](https://img.shields.io/github/v/release/jwortmann/quick-view?label=version)](https://github.com/jwortmann/quick-view/releases)
 [![Downloads](https://img.shields.io/packagecontrol/dt/QuickView)](https://packagecontrol.io/packages/QuickView)
 
-This package for Sublime Text provides the hover preview popups for images and CSS colors from Adobe Brackets.
+This package for Sublime Text provides preview popups for images and CSS colors on mouse hover.
 
-The design of the hover popups is intended to reproduce the style of the Quick View feature from Brackets, but it uses adaptive colors based on the color scheme and the plugin logic was written from scratch.
+The design of the hover popups is intended to reproduce the style of the Quick View feature from Adobe Brackets, but it uses adaptive colors based on the color scheme and the plugin logic was written from scratch.
 
 ## Installation
 
@@ -22,6 +22,7 @@ From the command palette select *Package Control: Install Package* and search fo
 ## Usage and Features
 
 Hover over an image link or CSS color in a supported syntax to show a preview popup.
+Previews for CSS gradients are currently not supported.
 Image previews are possible for the following file formats:
 
 * PNG
