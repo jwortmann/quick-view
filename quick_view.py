@@ -29,7 +29,7 @@ SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
 SCOPE_SELECTOR_CSS_COLORNAME = 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword'  # default CSS syntax on ST3 and ST4
 SCOPE_SELECTOR_CSS_RGB_LITERAL = 'constant.other.color.rgb-value'  # default CSS syntax
 SCOPE_SELECTOR_CSS_RGBA_LITERAL = 'constant.other.color.rgba-value'  # default CSS syntax
-SCOPE_SELECTOR_CSS_COLOR_FUNCTION = 'support.function.color | meta.property-value meta.function-call meta.group | meta.color meta.function-call meta.group'  # default CSS syntax & PackageDev .sublime-color-scheme syntax
+SCOPE_SELECTOR_CSS_FUNCTION = 'meta.property-value.css meta.function-call | meta.color.sublime-color-scheme meta.function-call'  # default CSS syntax & PackageDev .sublime-color-scheme syntax
 SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_DEFINITION = 'meta.property-name support.type.custom-property.css'  # default CSS syntax
 SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE = 'meta.property-value support.type.custom-property.css'  # default CSS syntax
 SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE = 'meta.color.sublime-color-scheme meta.function-call.var variable.other'  # PackageDev .sublime-color-scheme syntax
@@ -590,6 +590,15 @@ def rgb_color_swatch(view: sublime.View, region: sublime.Region, on_pre_show_pop
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
 def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int, b: int, a: float, on_pre_show_popup, on_hide_popup) -> None:
+    # ensure RGB values are in range 0..255
+    for val in [r, g, b]:
+        if val not in range(0, 256):
+            logging.error('invalid RGB color rgb(%i, %i, %i)', r, g, b)
+            return
+    # ensure alpha value is in range [0, 1]
+    if not 0.0 <= a <= 1.0:
+        logging.error('invalid alpha value %f', a)
+        return
     popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
     device_scale_factor = EM_SCALE_FACTOR * view.em_width()
     popup_width = int((40 + 2 * popup_border_width) * device_scale_factor)
@@ -718,22 +727,28 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
                 region = view.extract_scope(point)
                 sublime_variable_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
             # for now color variables from themes are not supported, because they can use legacy color syntax and it would be required to resolve 'extends' for themes
-            elif view.match_selector(point, SCOPE_SELECTOR_CSS_COLOR_FUNCTION):
-                line = view.line(point)
-                text = view.substr(line)
-                # https://facelessuser.github.io/coloraide/color/#color-matching
-                for m in COLOR_FUNCTION_PATTERN.finditer(text):
-                    if m.start() <= point - line.a <= m.end():
-                        mcolor = Color.match(text, start=m.start())
-                        if mcolor is not None:
-                            region = sublime.Region(line.a + mcolor.start, line.a + mcolor.end)  # type: ignore
-                            mcolor.color.convert('srgb', in_place=True)  # type: ignore
-                            r = int(255 * mcolor.color.red)
-                            g = int(255 * mcolor.color.green)
-                            b = int(255 * mcolor.color.blue)
-                            a = mcolor.color.alpha
-                            rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
-                        return
+            elif view.match_selector(point, SCOPE_SELECTOR_CSS_FUNCTION):
+                regions = view.find_by_selector(SCOPE_SELECTOR_CSS_FUNCTION)
+                for region in regions:
+                    if region.contains(point):
+                        logging.debug(view.substr(region))
+                        if view.match_selector(region.a, 'support.function.color'):
+                            mcolor = Color.match(view.substr(region), fullmatch=True)  # https://facelessuser.github.io/coloraide/color/#color-matching
+                            if mcolor is not None:
+                                mcolor.color.convert('srgb', in_place=True)  # type: ignore
+                                r = int(255 * mcolor.color.red)
+                                g = int(255 * mcolor.color.green)
+                                b = int(255 * mcolor.color.blue)
+                                a = mcolor.color.alpha
+                                rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
+                                return
+                        elif view.match_selector(region.a, 'support.function.gradient'):
+                            # @todo Find a python library to parse CSS gradients and convert to png image if possible
+                            logging.debug('CSS gradients are not supported yet')
+                            return
+                            # if view.substr(region).startswith('linear-gradient'):
+                            #     pass
+                        break
 
     def set_active_region(self, region: sublime.Region) -> None:
         self.active_region = region

@@ -22,7 +22,7 @@ From the command palette select *Package Control: Install Package* and search fo
 ## Usage and Features
 
 Hover over an image link or CSS color in a supported syntax to show a preview popup.
-Previews for CSS gradients are currently not supported.
+Previews for CSS gradients are not yet supported.
 Image previews are possible for the following file formats:
 
 * PNG
