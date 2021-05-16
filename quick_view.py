@@ -478,7 +478,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
         mime, data = parse_data_uri(data_uri)
     except Exception as ex:
         logging.debug(ex)
-        status_message(view, show_errors, 'QuickView not possible for data URI due to parsing error')
+        status_message(view, show_errors, 'Parsing error for data URI')
         return
     if mime == MimeType.SVG:
         converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
@@ -486,7 +486,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
             data = convert_bytes2png(data, ImageFormat.SVG, converter)
         except Exception as ex:
             logging.debug(ex)
-            status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from SVG')
+            status_message(view, show_errors, 'Conversion error for SVG data URI')
             return
         data_base64 = b64encode(data).decode('ascii')
         data_uri = data_uri_template.format(mime, data_base64)
@@ -496,7 +496,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
             data = convert_bytes2png(data, ImageFormat.WEBP, converter)
         except Exception as ex:
             logging.debug(ex)
-            status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from WebP')
+            status_message(view, show_errors, 'Conversion error for WebP data URI')
             return
         data_base64 = b64encode(data).decode('ascii')
         data_uri = data_uri_template.format(mime, data_base64)
@@ -506,12 +506,12 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
             data = convert_bytes2png(data, ImageFormat.AVIF, converter)
         except Exception as ex:
             logging.debug(ex)
-            status_message(view, show_errors, 'QuickView not possible for data URI due to error while trying to convert from AVIF')
+            status_message(view, show_errors, 'Conversion error for AVIF data URI')
             return
         data_base64 = b64encode(data).decode('ascii')
         data_uri = data_uri_template.format(mime, data_base64)
     elif mime not in [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP]:
-        status_message(view, show_errors, 'QuickView not possible for data URI due to unsupported mime type {}'.format(mime))
+        status_message(view, show_errors, 'Mime type {} for data URI not supported'.format(mime))
         return
     width, height = image_size(data)
     image_popup(view, region, width, height, data_uri, on_pre_show_popup, on_hide_popup)
@@ -522,7 +522,7 @@ def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show
     """
     path = local_path(view, url)
     if not path or not os.path.isfile(path):
-        status_message(view, show_errors, 'QuickView not possible because file {} was not found'.format(path))
+        status_message(view, show_errors, 'File {} was not found'.format(path))
         return
     image_format = format_from_url(path)
     if image_format in CONVERTABLE_IMAGE_FORMATS:
@@ -532,7 +532,7 @@ def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show
             data = convert_file2png(path, image_format, converter)
         except Exception as ex:
             logging.debug(ex)
-            status_message(view, show_errors, 'QuickView not possible for file {} due to image conversion error'.format(path))
+            status_message(view, show_errors, 'Image conversion error for file {}'.format(path))
             return
         width, height = image_size(data)
         data_base64 = b64encode(data).decode('ascii')
@@ -561,7 +561,7 @@ def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_e
             data = convert_bytes2png(data, image_format, converter)
         except Exception as ex:
             logging.debug(ex)
-            status_message(view, show_errors, 'QuickView not possible for url {} due to image conversion error'.format(url))
+            status_message(view, show_errors, 'Image conversion error for url {}'.format(url))
             return
     width, height = image_size(data)
     data_base64 = b64encode(data).decode('ascii')
@@ -593,11 +593,11 @@ def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int
     # ensure RGB values are in range 0..255
     for val in [r, g, b]:
         if val not in range(0, 256):
-            logging.error('invalid RGB color rgb(%i, %i, %i)', r, g, b)
+            logging.debug('invalid RGB color rgb(%i, %i, %i)', r, g, b)
             return
     # ensure alpha value is in range [0, 1]
     if not 0.0 <= a <= 1.0:
-        logging.error('invalid alpha value %f', a)
+        logging.debug('invalid alpha value %f', a)
         return
     popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
     device_scale_factor = EM_SCALE_FACTOR * view.em_width()
@@ -628,14 +628,14 @@ def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region,
     # only proceed if there is exactly 1 definition for the custom property, because this implementation is
     # not aware of CSS rule scopes or possible inheritance resulting from the HTML structure
     if len(definition_regions) == 0:
-        status_message(view, show_errors, 'QuickView not possible because no definition found for custom property {}'.format(custom_property_name))
+        status_message(view, show_errors, 'No definition found for custom property {}'.format(custom_property_name))
         return
     elif len(definition_regions) > 1:
-        status_message(view, show_errors, 'QuickView not possible because more than one definition found for custom property {}'.format(custom_property_name))
+        status_message(view, show_errors, 'More than one definition found for custom property {}'.format(custom_property_name))
         return
     # extract next token
     a = view.find(r'\S', definition_regions[0].b).a
-    msg = 'QuickView not possible because no valid color could be identified for custom property {}'.format(custom_property_name)
+    msg = 'No valid color could be identified for custom property {}'.format(custom_property_name)
     if view.substr(a) != ':':
         status_message(view, show_errors, msg)
         return
@@ -692,7 +692,7 @@ def sublime_variable_color_swatch(view: sublime.View, region: sublime.Region, sh
             a = mcolor.color.alpha
             rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
             return
-    status_message(view, show_errors, 'QuickView not possible because no valid color could be identified for variable {}'.format(variable_name))
+    status_message(view, show_errors, 'No valid color could be identified for variable {}'.format(variable_name))
 
 
 class QuickViewHoverListener(sublime_plugin.EventListener):
@@ -767,7 +767,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         try:
             region = self.view.sel()[0]  # in case of multiple cursors only the first one is used, because there can only a single popup be visible at a time
         except IndexError:
-            logging.error('No selections in the active view')
+            logging.error('no selections in the active view')
             return
         is_empty_selection = region.empty()
         if is_empty_selection:
