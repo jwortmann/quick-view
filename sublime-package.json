@@ -1,0 +1,80 @@
+{
+  "contributions": {
+    "settings": [
+      {
+        "file_patterns": ["/QuickView.sublime-settings"],
+        "schema": {
+          "properties": {
+            "color_preview": {
+              "type": "boolean",
+              "default": true,
+              "markdownDescription": "Whether or not to show color previews"
+            },
+            "image_preview": {
+              "type": "boolean",
+              "default": true,
+              "markdownDescription": "Whether or not to show image previews"
+            },
+            "image_scope_selector": {
+              "type": "string",
+              "default": "meta.tag meta.attribute-with-value string | markup.underline.link.image.markdown | meta.property-value.css meta.function-call string",
+              "markdownDescription": "Scope selector to define applicable regions where image previews should be enabled. The regions should span no more than the actual image link URL or data URI (possible string quotes at the begin and end are allowed).\n\nFor an explanation how scope selectors work see https://www.sublimetext.com/docs/selectors.html."
+            },
+            "extensionless_image_preview": {
+              "type": "boolean",
+              "default": false,
+              "markdownDescription": "Whether or not to try and show image previews for URLs missing extensions\n(e.g., `https://avatars.githubusercontent.com/u/684879?s=200&v=4`)\n\nThis setting applies only to mouse hover and is ignored when image previews are manually invoked from the command palette or a key binding."
+            },
+            "avif_converter": {
+              "type": "string",
+              "default": "",
+              "oneOf": [
+                {"const": "", "title": "not enabled"},
+                {"const": "magick", "title": "ImageMagick"}
+              ],
+              "markdownDescription": "Image converter program for the AVIF file format.\n\nSupported options are:\n- \"magick\" (ImageMagick)"
+            },
+            "svg_converter": {
+              "type": "string",
+              "default": "",
+              "oneOf": [
+                {"const": "", "title": "not enabled"},
+                {"const": "inkscape", "title": "Inkscape"},
+                {"const": "magick", "title": "ImageMagick"}
+              ],
+              "markdownDescription": "Image converter program for the SVG file format.\n\nSupported options are:\n- \"inkscape\" (Inkscape)\n- \"magick\" (ImageMagick)"
+            },
+            "webp_converter": {
+              "type": "string",
+              "default": "",
+              "oneOf": [
+                {"const": "", "title": "not enabled"},
+                {"const": "dwebp", "title": "dwebp"},
+                {"const": "magick", "title": "ImageMagick"}
+              ],
+              "markdownDescription": "Image converter program for the WebP file format.\n\nSupported options are:\n- \"dwebp\" (precompiled WebP decoder from https://developers.google.com/speed/webp/docs/precompiled)\n- \"magick\" (ImageMagick)"
+            },
+            "popup_border_width": {
+              "type": "number",
+              "default": 8,
+              "minimum": 0,
+              "markdownDescription": "The border width of the popups. This does not necessarily correspond with actual pixel values, depending on your screen resolution and font size."
+            },
+            "popup_style": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {"const": "rounded", "title": "Draw the border with rounded corners."},
+                  {"const": "pointer", "title": "Draw a small pointer triangle above the top border."}
+                ]
+              },
+              "uniqueItems": true,
+              "default": ["rounded", "pointer"],
+              "markdownDescription": "Popup style configuration. An empty array for this setting can be used if none of the following styles should be applied, e.g. for an improved appearance if popup shadows are enabled.\n\nSupported options are:\n- \"rounded\" (draw the border with rounded corners)\n- \"pointer\" (draw a small pointer triangle above the top border)"
+            }
+          }
+        }
+      }
+    ]
+  }
+}
