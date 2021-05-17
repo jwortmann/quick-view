@@ -1,5 +1,5 @@
 import io
-import logging  # logging.basicConfig(level=logging.DEBUG)
+import logging
 import os
 import re
 import struct
@@ -10,6 +10,7 @@ import urllib.parse, urllib.request
 
 from base64 import b64encode, b64decode
 from coloraide import Color
+from colorsys import rgb_to_hls
 from functools import lru_cache
 from socket import timeout
 from .lib import png
@@ -168,15 +169,25 @@ def format_from_url(url: str) -> int:
 
 def hex2rgba(color: str) -> tuple:
     """
-    Convert 4-digit or 8-digit RGBA hex-color string into R, G, B, A tuple with
-    integer values 0..255 for R, G, B and floating point value [0, 1] for A
+    Convert hex RGB or RGBA color string into R, G, B, A tuple with integer
+    values 0..255 for R, G, B and floating point value [0, 1] for A
     """
-    if len(color) == 5:  # 4-digit RGBA hex-color
+    if len(color) == 4:  # 3-digit RGB
+        r = int(color[1] * 2, 16)
+        g = int(color[2] * 2, 16)
+        b = int(color[3] * 2, 16)
+        a = 1.0
+    if len(color) == 5:  # 4-digit RGBA
         r = int(color[1] * 2, 16)
         g = int(color[2] * 2, 16)
         b = int(color[3] * 2, 16)
         a = int(color[4] * 2, 16) / 255
-    elif len(color) == 9:  # 8-digit RGBA hex-color
+    elif len(color) == 7:  # 6-digit RGB
+        r = int(color[1:3], 16)
+        g = int(color[3:5], 16)
+        b = int(color[5:7], 16)
+        a = 1.0
+    elif len(color) == 9:  # 8-digit RGBA
         r = int(color[1:3], 16)
         g = int(color[3:5], 16)
         b = int(color[5:7], 16)
@@ -184,30 +195,6 @@ def hex2rgba(color: str) -> tuple:
     else:
         raise ValueError('invalid color ' + color)
     return r, g, b, a
-
-def hex2hsl(color: str) -> tuple:
-    """
-    Convert 6-digit RGB hex-color string into H, S, L tuple
-    """
-    r = int(color[1:3], 16) / 255
-    g = int(color[3:5], 16) / 255
-    b = int(color[5:7], 16) / 255
-    maxval = max(r, g, b)
-    minval = min(r, g, b)
-    c = maxval - minval
-    h = 0
-    s = 0
-    l = (maxval + minval) / 2
-    if c != 0:
-        if maxval == r:
-            h = (g - b) / c % 6
-        elif maxval == g:
-            h = (b - r) / c + 2
-        elif maxval == b:
-            h = (r - g) / c + 4
-        h = 60 * h
-        s = c / (2 - maxval - minval) if l > 0.5 else c / (maxval + minval)
-    return h, s, l
 
 @lru_cache(maxsize=128)
 def checkerboard_png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> str:
@@ -606,7 +593,8 @@ def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int
     if a == 1.0:
         color_swatch = '<div class="color-swatch" style="background-color: rgb({}, {}, {})"></div>'.format(r, g, b)
     else:
-        _, _, lightness = hex2hsl(view.style()['background'])
+        r0, g0, b0, _ = hex2rgba(view.style()['background'])
+        _, lightness, _ = rgb_to_hls(r0/255, g0/255, b0/255)
         color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
         bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
         bg_black = BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
