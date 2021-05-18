@@ -125,6 +125,8 @@ class MimeType:
 
 NATIVE_IMAGE_FORMATS = [ImageFormat.PNG, ImageFormat.JPEG, ImageFormat.GIF, ImageFormat.BMP]
 CONVERTABLE_IMAGE_FORMATS = [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]
+IGNORED_FILE_EXTENSIONS = ('.html', '.css', '.js', '.json', '.md', '.xml', '.mp3', '.ogv', '.mp4', '.mpeg', '.webm', '.zip', '.tgz')
+
 SUPPORTED_MIME_TYPES = [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP, MimeType.SVG, MimeType.WEBP, MimeType.AVIF]
 
 SUPPORTED_CONVERTERS = {
@@ -167,7 +169,7 @@ def format_from_url(url: str) -> int:
     _, file_extension = os.path.splitext(url.lower())
     return FILE_EXTENSION_FORMAT_MAP.get(file_extension) or ImageFormat.UNSUPPORTED
 
-def hex2rgba(color: str) -> tuple:
+def hex2rgba(color: str) -> tuple:  # Tuple[int, int, int, float]
     """
     Convert hex RGB or RGBA color string into R, G, B, A tuple with integer
     values 0..255 for R, G, B and floating point value [0, 1] for A
@@ -254,7 +256,7 @@ def popup_location(view: sublime.View, region: sublime.Region, popup_width: int)
             horizontal_correction = 1  # shift 1 character to the right to ensure that the popup doesn't point to the left side of potential string punctuation
     return view.layout_to_text((x, ay)) + horizontal_correction
 
-def scale_image(width: int, height: int, device_scale_factor: float) -> tuple:
+def scale_image(width: int, height: int, device_scale_factor: float) -> tuple:  # Tuple[int, int]
     """
     Scale image such that:
     - aspect ratio gets preserved
@@ -281,7 +283,7 @@ def format_template(view: sublime.View, popup_width: int, content: str) -> str:
     return quickview_template.format(margin=margin, border=popup_border_width, border_radius=popup_border_radius, bubble=bubble, content=content)
 
 @lru_cache(maxsize=16)
-def request_img(url: str) -> tuple:
+def request_img(url: str) -> tuple:  # Tuple[Optional[str], Optional[str]]
     try:
         logging.debug('requesting image from %s', url)
         with urllib.request.urlopen(url, timeout=2) as response:
@@ -354,7 +356,7 @@ def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
         raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     return png
 
-def image_size(data) -> tuple:
+def image_size(data) -> tuple:  # Tuple[int, int]
     """
     Extract image width and height from the file header
     """
@@ -402,7 +404,7 @@ def image_size(data) -> tuple:
     return width, height
 
 # @see https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
-def parse_data_uri(uri: str) -> tuple:
+def parse_data_uri(uri: str) -> tuple:  # Tuple[str, str]
     if not uri.startswith('data:') or ',' not in uri:
         raise ValueError('invalid data uri')
     media_type, _, raw_data = uri[5:].partition(',')
@@ -450,7 +452,7 @@ def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.
             status_message(view, show_errors, 'No valid AVIF converter set in the package settings')
             return
         if url.lower().startswith(SUPPORTED_PROTOCOLS):
-            if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or extensionless_image_preview:
+            if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or (extensionless_image_preview and not url.lower().endswith(IGNORED_FILE_EXTENSIONS)):
                 sublime.set_timeout_async(lambda: web_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
         elif image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
             if url.startswith('file://'):
