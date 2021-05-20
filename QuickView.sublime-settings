@@ -16,6 +16,20 @@
     // are manually invoked from the command palette or a key binding.
     "extensionless_image_preview": false,
 
+    // A mapping that can be used to define character strings which should be
+    // substituted when resolving relative image URLs. The replacement value must
+    // be a string and supports the variables listed under
+    // https://www.sublimetext.com/docs/build_systems.html#variables.
+    // Characters within the filename will not be substituted. The URL will still
+    // be resolved relative to the current file, unless an absolute path is
+    // explicitly given or a variable with a full path is used. The following
+    // example allows to show image previews for a path like ~/assets/img/foo.png
+    // which then refers to the local file at <project folder>/app/assets/img/foo.png
+    // "path_substitutions": {
+    //     "~": "$project_path/app"
+    // }
+    "path_substitutions": {},
+
     // Image converter program for the AVIF file format. Supported options are:
     //  - "magick" (ImageMagick)
     "avif_converter": "",

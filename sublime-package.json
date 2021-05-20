@@ -25,33 +25,36 @@
               "default": false,
               "markdownDescription": "Whether or not to try and show image previews for URLs missing extensions\n(e.g., `https://avatars.githubusercontent.com/u/684879?s=200&v=4`)\n\nThis setting applies only to mouse hover and is ignored when image previews are manually invoked from the command palette or a key binding."
             },
+            "path_substitutions": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "string",
+                  "markdownDescription": "Substitution to be used when resolving image URLs"
+                }
+              },
+              "additionalProperties": false,
+              "markdownDescription": "A mapping that can be used to define character strings which should be substituted when resolving relative image URLs. The replacement value must be a string and supports the variables listed under https://www.sublimetext.com/docs/build_systems.html#variables.\n\nCharacters within the filename will not be substituted. The URL will still be resolved relative to the current file, unless an absolute path is explicitly given or a variable with a full path is used.\n\nThe following example allows to show image previews for a path like `~/assets/img/file.png`, which then refers to the local file at `<project folder>/app/assets/img/file.png`:\n\n```json\n{\n\t\"path_substitutions\": {\n\t\t\"~\": \"$project_path/app\"\n\t}\n}\n```"
+            },
             "avif_converter": {
               "type": "string",
               "default": "",
-              "oneOf": [
-                {"const": "", "title": "not enabled"},
-                {"const": "magick", "title": "ImageMagick"}
-              ],
+              "enum": ["", "magick"],
+              "markdownEnumDescriptions": ["not enabled", "ImageMagick"],
               "markdownDescription": "Image converter program for the AVIF file format.\n\nSupported options are:\n- \"magick\" (ImageMagick)"
             },
             "svg_converter": {
               "type": "string",
               "default": "",
-              "oneOf": [
-                {"const": "", "title": "not enabled"},
-                {"const": "inkscape", "title": "Inkscape"},
-                {"const": "magick", "title": "ImageMagick"}
-              ],
+              "enum": ["", "inkscape", "magick"],
+              "markdownEnumDescriptions": ["not enabled", "Inkscape", "ImageMagick"],
               "markdownDescription": "Image converter program for the SVG file format.\n\nSupported options are:\n- \"inkscape\" (Inkscape)\n- \"magick\" (ImageMagick)"
             },
             "webp_converter": {
               "type": "string",
               "default": "",
-              "oneOf": [
-                {"const": "", "title": "not enabled"},
-                {"const": "dwebp", "title": "dwebp"},
-                {"const": "magick", "title": "ImageMagick"}
-              ],
+              "enum": ["", "dwebp", "magick"],
+              "markdownEnumDescriptions": ["not enabled", "dwebp", "ImageMagick"],
               "markdownDescription": "Image converter program for the WebP file format.\n\nSupported options are:\n- \"dwebp\" (precompiled WebP decoder from https://developers.google.com/speed/webp/docs/precompiled)\n- \"magick\" (ImageMagick)"
             },
             "popup_border_width": {
@@ -63,10 +66,11 @@
             "popup_style": {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {"const": "rounded", "title": "Draw the border with rounded corners."},
-                  {"const": "pointer", "title": "Draw a small pointer triangle above the top border."}
-                ]
+                "enum": ["rounded", "pointer"],
+                "markdownEnumDescriptions": [
+                  "Draw the border with rounded corners.",
+                  "Draw a small pointer triangle above the top border."
+                ],
               },
               "uniqueItems": true,
               "default": ["rounded", "pointer"],

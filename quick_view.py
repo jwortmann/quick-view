@@ -25,8 +25,6 @@ MAX_POPUP_IMAGE_WIDTH = 200
 BACKGROUND_WHITE_PIXEL = {'light': 255, 'dark': 51}
 BACKGROUND_BLACK_PIXEL = {'light': 204, 'dark': 0}
 
-SUPPORTED_PROTOCOLS = ('http:', 'https:', 'ftp:')
-
 SCOPE_SELECTOR_CSS_COLORNAME = 'support.constant.color - support.constant.color.w3c.special - support.constant.color.w3c-special-color-keyword'  # default CSS syntax on ST3 and ST4
 SCOPE_SELECTOR_CSS_RGB_LITERAL = 'constant.other.color.rgb-value'  # default CSS syntax
 SCOPE_SELECTOR_CSS_RGBA_LITERAL = 'constant.other.color.rgba-value'  # default CSS syntax
@@ -412,15 +410,21 @@ def parse_data_uri(uri: str) -> tuple:  # Tuple[str, str]
     mime = media_type.split(';')[0] if media_type else 'text/plain'
     return mime, data
 
-def local_path(view: sublime.View, url: str):
-    if os.path.isabs(url):
-        return url
+def expand_local_path(view: sublime.View, url: str) -> str:
+    path_substitutions = sublime.load_settings(SETTINGS_FILE).get('path_substitutions')
+    path, filename = os.path.split(url)  # split filename from path because variables should not be expanded within the filename
+    for alias, replacement in path_substitutions.items():
+        path = path.replace(alias, replacement)
+    path = sublime.expand_variables(path, view.window().extract_variables())
+    path = os.path.join(path, filename)  # joint back together
+    if os.path.isabs(path):
+        return path
     else:
         file_name = view.file_name()
         if not file_name:
-            return None
+            return ''
         else:
-            return os.path.abspath(os.path.join(os.path.dirname(file_name), url))
+            return os.path.abspath(os.path.join(os.path.dirname(file_name), path))
 
 def status_message(view: sublime.View, show: bool, msg: str) -> None:
     """
@@ -432,32 +436,41 @@ def status_message(view: sublime.View, show: bool, msg: str) -> None:
     if show:
         view.window().status_message(msg)
 
+def requires_missing_converter(settings: sublime.Settings, image_format: int) -> bool:
+    if image_format == ImageFormat.SVG and settings.get('svg_converter') not in SUPPORTED_CONVERTERS[ImageFormat.SVG]:
+        return True
+    elif image_format == ImageFormat.WEBP and settings.get('webp_converter') not in SUPPORTED_CONVERTERS[ImageFormat.WEBP]:
+        return True
+    elif image_format == ImageFormat.AVIF and settings.get('avif_converter') not in SUPPORTED_CONVERTERS[ImageFormat.AVIF]:
+        return True
+    return False
+
 def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.Settings, extensionless_image_preview: bool, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     url = view.substr(region)
+    # remove possible string quotes
     if view.match_selector(region.a, 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
         url = url[1:]
     if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
         url = url[:-1]
+    # differentiate based on URI scheme
     if url.startswith('data:'):
         sublime.set_timeout_async(lambda: data_uri_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
     else:
         image_format = format_from_url(url)
-        if image_format == ImageFormat.SVG and settings.get('svg_converter') not in SUPPORTED_CONVERTERS[ImageFormat.SVG]:
-            status_message(view, show_errors, 'No valid SVG converter set in the package settings')
+        if requires_missing_converter(settings, image_format):
+            status_message(view, show_errors, 'No valid {} converter set in the package settings'.format(IMAGE_FORMAT_NAMES[image_format]))
             return
-        elif image_format == ImageFormat.WEBP and settings.get('webp_converter') not in SUPPORTED_CONVERTERS[ImageFormat.WEBP]:
-            status_message(view, show_errors, 'No valid WebP converter set in the package settings')
-            return
-        elif image_format == ImageFormat.AVIF and settings.get('avif_converter') not in SUPPORTED_CONVERTERS[ImageFormat.AVIF]:
-            status_message(view, show_errors, 'No valid AVIF converter set in the package settings')
-            return
-        if url.lower().startswith(SUPPORTED_PROTOCOLS):
+        if url.lower().startswith(('http:', 'https:', 'ftp:')):
             if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or (extensionless_image_preview and not url.lower().endswith(IGNORED_FILE_EXTENSIONS)):
                 sublime.set_timeout_async(lambda: web_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
-        elif image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
-            if url.startswith('file://'):
-                url = url[7:]
-            sublime.set_timeout_async(lambda: local_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
+        elif url.startswith('file://'):  # local absolute path
+            if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
+                url = url[7:]  # 'file://' will be added back in the following function unless image gets converted to data URI
+                sublime.set_timeout_async(lambda: local_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
+        else:  # local relative path
+            if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
+                path = expand_local_path(view, url)
+                sublime.set_timeout_async(lambda: local_image_popup(view, region, path, show_errors, on_pre_show_popup, on_hide_popup))
 
 def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     """
@@ -505,18 +518,17 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
     width, height = image_size(data)
     image_popup(view, region, width, height, data_uri, on_pre_show_popup, on_hide_popup)
 
-def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def local_image_popup(view: sublime.View, region: sublime.Region, path: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     """
     Show an image popup for a local file with absolute or relative file path
     """
-    path = local_path(view, url)
-    if not path or not os.path.isfile(path):
+    if not os.path.isfile(path):
         status_message(view, show_errors, 'File {} was not found'.format(path))
         return
+    logging.debug('loading local image from %s', path)
     image_format = format_from_url(path)
     if image_format in CONVERTABLE_IMAGE_FORMATS:
         converter = sublime.load_settings(SETTINGS_FILE).get({ImageFormat.SVG: 'svg_converter', ImageFormat.WEBP: 'webp_converter', ImageFormat.AVIF: 'avif_converter'}[image_format])
-        logging.debug('loading local image from %s', path)
         try:
             data = convert_file2png(path, image_format, converter)
         except Exception as ex:
@@ -527,7 +539,6 @@ def local_image_popup(view: sublime.View, region: sublime.Region, url: str, show
         data_base64 = b64encode(data).decode('ascii')
         src = data_uri_template.format(MimeType.PNG, data_base64)
     else:
-        logging.debug('loading local image from %s', path)
         with open(path, 'rb') as data:
             width, height = image_size(data)
         src = 'file://' + path
