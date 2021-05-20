@@ -414,8 +414,9 @@ def expand_local_path(view: sublime.View, url: str) -> str:
     path_substitutions = sublime.load_settings(SETTINGS_FILE).get('path_substitutions')
     path, filename = os.path.split(url)  # split filename from path because variables should not be expanded within the filename
     for alias, replacement in path_substitutions.items():
-        path = path.replace(alias, replacement)
-    path = sublime.expand_variables(path, view.window().extract_variables())
+        if alias in path:
+            replacement = sublime.expand_variables(replacement, view.window().extract_variables())
+            path = path.replace(alias, replacement)
     path = os.path.join(path, filename)  # joint back together
     if os.path.isabs(path):
         return path
