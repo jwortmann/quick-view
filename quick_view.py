@@ -31,6 +31,10 @@ SCOPE_SELECTOR_CSS_RGBA_LITERAL = 'constant.other.color.rgba-value'  # default C
 SCOPE_SELECTOR_CSS_FUNCTION = 'meta.property-value.css meta.function-call | meta.color.sublime-color-scheme meta.function-call'  # default CSS syntax & PackageDev .sublime-color-scheme syntax
 SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_DEFINITION = 'meta.property-name support.type.custom-property.css'  # default CSS syntax
 SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE = 'meta.property-value support.type.custom-property.css'  # default CSS syntax
+SCOPE_SELECTOR_SASS_VARIABLE_DEFINITION = 'variable.declaration.sass'  # Sass package Sass & SCSS syntax
+SCOPE_SELECTOR_SASS_VARIABLE_REFERENCE = 'meta.property-value variable.other.sass'  # Sass package Sass & SCSS syntax
+SCOPE_SELECTOR_LESS_VARIABLE_DEFINITION = 'variable.declaration.less'  # LESS package
+SCOPE_SELECTOR_LESS_VARIABLE_REFERENCE = 'meta.property-value variable.other.less'  # LESS package
 SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE = 'meta.color.sublime-color-scheme meta.function-call.var variable.other'  # PackageDev .sublime-color-scheme syntax
 
 COLOR_START_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\(|\b(?<![-#&$])[\w]{3,}(?![(-])\b|(?<![&])#)')
@@ -660,6 +664,41 @@ def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region,
         return
     status_message(view, show_errors, msg)
 
+def variable_color_swatch(view: sublime.View, region: sublime.Region, definition_scope_selector: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+    """
+    Display preview for color variable in Sass, SCSS & Less
+    """
+    variable_name = view.substr(region)
+    definition_regions = [region for region in view.find_by_selector(definition_scope_selector) if view.substr(region) == variable_name]
+    if len(definition_regions) == 0:
+        status_message(view, show_errors, 'No definition found for variable {}'.format(variable_name))
+        return
+    elif len(definition_regions) > 1:
+        status_message(view, show_errors, 'More than one definition found for variable {}'.format(variable_name))
+        return
+    a = view.find(r'\S', definition_regions[0].b).a
+    msg = 'No valid color could be identified for variable {}'.format(variable_name)
+    if view.substr(a) != ':':
+        status_message(view, show_errors, msg)
+        return
+    a += 1
+    b = view.find_by_class(definition_regions[0].b, forward=True, classes=sublime.CLASS_LINE_END)
+    if a >= b:
+        status_message(view, show_errors, msg)
+        return
+    value_region = sublime.Region(a, b)
+    text = re.split('[;}]', view.substr(value_region))[0].strip()
+    mcolor = Color.match(text)
+    if mcolor is not None:
+        mcolor.color.convert('srgb', in_place=True)  # type: ignore
+        r = int(255 * mcolor.color.red)
+        g = int(255 * mcolor.color.green)
+        b = int(255 * mcolor.color.blue)
+        a = mcolor.color.alpha
+        rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
+        return
+    status_message(view, show_errors, msg)
+
 def sublime_variable_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
     """
     Display preview for color variables in Sublime resource files (JSON)
@@ -728,6 +767,12 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
             elif view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
                 region = view.extract_scope(point)
                 css_custom_property_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
+            elif view.match_selector(point, SCOPE_SELECTOR_SASS_VARIABLE_REFERENCE):
+                region = view.extract_scope(point)
+                variable_color_swatch(view, region, SCOPE_SELECTOR_SASS_VARIABLE_DEFINITION, False, self.set_active_region, self.reset_active_region)
+            elif view.match_selector(point, SCOPE_SELECTOR_LESS_VARIABLE_REFERENCE):
+                region = view.extract_scope(point)
+                variable_color_swatch(view, region, SCOPE_SELECTOR_LESS_VARIABLE_DEFINITION, False, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE):
                 region = view.extract_scope(point)
                 sublime_variable_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
@@ -791,6 +836,14 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
             region = self.view.extract_scope(point)
             css_custom_property_color_swatch(self.view, region, True, self.set_popup_active, self.set_popup_inactive)
+            return
+        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_SASS_VARIABLE_REFERENCE):
+            region = self.view.extract_scope(point)
+            variable_color_swatch(self.view, region, SCOPE_SELECTOR_SASS_VARIABLE_DEFINITION, True, self.set_popup_active, self.set_popup_inactive)
+            return
+        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_LESS_VARIABLE_REFERENCE):
+            region = self.view.extract_scope(point)
+            variable_color_swatch(self.view, region, SCOPE_SELECTOR_LESS_VARIABLE_DEFINITION, True, self.set_popup_active, self.set_popup_inactive)
             return
         elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE):
             region = self.view.extract_scope(point)
