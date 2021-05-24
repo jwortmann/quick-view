@@ -413,11 +413,12 @@ def parse_data_uri(uri: str) -> tuple:  # Tuple[str, str]
 def expand_local_path(view: sublime.View, url: str) -> str:
     path_substitutions = sublime.load_settings(SETTINGS_FILE).get('path_substitutions')
     path, filename = os.path.split(url)  # split filename from path because variables should not be expanded within the filename
+    variables = view.window().extract_variables()
     for alias, replacement in path_substitutions.items():
         if alias in path:
-            replacement = sublime.expand_variables(replacement, view.window().extract_variables())
+            replacement = sublime.expand_variables(replacement, variables)
             path = path.replace(alias, replacement)
-    path = os.path.join(path, filename)  # joint back together
+    path = os.path.join(path, filename)  # join back together
     if os.path.isabs(path):
         return path
     else:
@@ -717,6 +718,8 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
                 rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGB_LITERAL):
                 region = view.extract_scope(point)
+                if region.a > 0 and region.size() in [3, 6] and view.substr(region.a - 1) == '#':  # fix for unconventional scopes from SCSS package
+                    region.a -= 1
                 rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGBA_LITERAL):
                 region = view.extract_scope(point)
