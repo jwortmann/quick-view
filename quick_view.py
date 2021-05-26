@@ -415,13 +415,14 @@ def parse_data_uri(uri: str) -> tuple:  # Tuple[str, str]
     return mime, data
 
 def expand_local_path(view: sublime.View, url: str) -> str:
-    path_substitutions = sublime.load_settings(SETTINGS_FILE).get('path_substitutions')
+    path_aliases = sublime.load_settings(SETTINGS_FILE).get('path_aliases')
     path, filename = os.path.split(url)  # split filename from path because variables should not be expanded within the filename
     variables = view.window().extract_variables()
-    for alias, replacement in path_substitutions.items():
-        if alias in path:
+    for alias, replacement in path_aliases.items():
+        if path.startswith(alias):
             replacement = sublime.expand_variables(replacement, variables)
-            path = path.replace(alias, replacement)
+            path = path.replace(alias, replacement, 1)
+            break
     path = os.path.join(path, filename)  # join back together
     if os.path.isabs(path):
         return path
