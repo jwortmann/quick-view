@@ -326,7 +326,7 @@ def convert_bytes2png(data: bytes, input_format: int, converter: str) -> bytes:
     elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
         logging.debug('using ImageMagick to convert %s image', IMAGE_FORMAT_NAMES[input_format])
         fmt = {ImageFormat.SVG: 'svg:-', ImageFormat.WEBP: 'webp:-', ImageFormat.AVIF: 'avif:-'}[input_format]
-        if sublime.load_settings(SETTINGS_FILE).get('background_pattern', False):  # @todo Experimental setting: use checkerboard background pattern for images with transparency
+        if sublime.load_settings(SETTINGS_FILE).get('image_background_pattern', True):  # use checkerboard background pattern for images with transparency
             p = subprocess.Popen(['magick', 'composite', '-compose', 'dst-over', '-tile', 'pattern:checkerboard', '-background', 'transparent', fmt, 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
         else:
             p = subprocess.Popen(['magick', '-background', 'transparent', fmt, 'png:-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, startupinfo=startupinfo)
