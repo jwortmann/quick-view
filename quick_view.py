@@ -350,7 +350,7 @@ def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
         png = subprocess.check_output(['dwebp', '-o', '-', '--', path], startupinfo=startupinfo)
     elif converter == 'magick' and input_format in [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]:
         logging.debug('using ImageMagick to convert %s image', IMAGE_FORMAT_NAMES[input_format])
-        if sublime.load_settings(SETTINGS_FILE).get('background_pattern', False):
+        if sublime.load_settings(SETTINGS_FILE).get('image_background_pattern', True):
             png = subprocess.check_output(['magick', 'composite', '-compose', 'dst-over', '-tile', 'pattern:checkerboard', '-background', 'transparent', path, 'png:-'], startupinfo=startupinfo)
         else:
             png = subprocess.check_output(['magick', '-background', 'transparent', path, 'png:-'], startupinfo=startupinfo)
