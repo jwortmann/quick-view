@@ -94,7 +94,7 @@ quickview_template = '''
                 font-size: 0.8rem;
                 font-family: system;
                 background-color: var(--bc-panel-bg-promoted);
-                border-top: 1px solid var(--bc-highlight);
+                border-top: {label_border_top}px solid var(--bc-highlight);
                 border-bottom: 1px solid var(--bc-highlight-bottom);
                 color: var(--bc-text);
             }}
@@ -290,7 +290,8 @@ def format_template(view: sublime.View, popup_width: int, content: str) -> str:
     popup_border_radius = 0.3 if 'rounded' in popup_style else 0
     margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()  # @todo Does this work on high DPI displays? Should maybe better use rem units instead of px here
     popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-    return quickview_template.format(margin=margin, border=popup_border_width, border_radius=popup_border_radius, bubble=bubble, content=content)
+    label_border_top = 2 if int(sublime.version()) >= 4000 else 1
+    return quickview_template.format(margin=margin, border=popup_border_width, border_radius=popup_border_radius, label_border_top=label_border_top, bubble=bubble, content=content)
 
 @lru_cache(maxsize=16)
 def request_img(url: str) -> tuple:  # Tuple[Optional[str], Optional[str]]
