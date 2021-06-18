@@ -609,7 +609,7 @@ def image_popup(view: sublime.View, region: sublime.Region, width: int, height: 
     label = image_size_label(width, height)
     if 'open_image_button' in settings.get('popup_style'):
         if src.startswith(FILE_PREFIX) or src.startswith(DATA_PREFIX) and int(sublime.version()) >= 4065:
-            label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">◨</a>'.format(src)
+            label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">❐</a>'.format(src)
     location = popup_location(view, region, popup_width)
     img_preview = '<img src="{}" width="{}" height="{}" /><div class="img-label">{}</div>'.format(src, scaled_width, scaled_height, label)
     content = format_template(view, popup_width, img_preview)
