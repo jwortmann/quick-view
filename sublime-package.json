@@ -66,15 +66,16 @@
             "popup_style": {
               "type": "array",
               "items": {
-                "enum": ["rounded", "pointer"],
+                "enum": ["rounded", "pointer", "open_image_button"],
                 "markdownEnumDescriptions": [
                   "Draw the border with rounded corners.",
                   "Draw a small pointer triangle above the top border."
+                  "Add a button for image previews to open image in new tab."
                 ],
               },
               "uniqueItems": true,
-              "default": ["rounded", "pointer"],
-              "markdownDescription": "Popup style configuration. An empty array for this setting can be used if none of the following styles should be applied, e.g. for an improved appearance if popup shadows are enabled.\n\nSupported options are:\n- \"rounded\" (draw the border with rounded corners)\n- \"pointer\" (draw a small pointer triangle above the top border)"
+              "default": ["rounded", "pointer", "open_image_button"],
+              "markdownDescription": "Popup style configuration. Allows to tweak the appearance, e.g. if popup shadows are enabled.\n\nSupported options are:\n- \"rounded\" (draw the border with rounded corners)\n- \"pointer\" (draw a small pointer triangle above the top border)\n- \"open_image_button\" (add a button for image previews to open image in new tab)"
             }
           }
         }
