@@ -63,7 +63,7 @@ quickview_template = '''
             body {{
                 padding: 0;
                 margin: 0;
-                background-color: var(--background);
+                background-color: {background};
             }}
             .preview-bubble {{
                 width: 0;
@@ -292,7 +292,16 @@ def format_template(view: sublime.View, popup_width: int, content: str) -> str:
     margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()  # @todo Does this work on high DPI displays? Should maybe better use rem units instead of px here
     popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
     label_top_margin = 1 if int(sublime.version()) >= 4000 else 0
-    return quickview_template.format(margin=margin, border=popup_border_width, border_radius=popup_border_radius, label_top_margin=label_top_margin, bubble=bubble, content=content)
+    popup_shadows = sublime.load_settings('Preferences.sublime-settings').get('popup_shadows', False)
+    background = 'color(var(--background) lightness(- 1.2%))' if popup_shadows else 'var(--background)'
+    return quickview_template.format(
+        background=background,
+        margin=margin,
+        border=popup_border_width,
+        border_radius=popup_border_radius,
+        label_top_margin=label_top_margin,
+        bubble=bubble,
+        content=content)
 
 @lru_cache(maxsize=16)
 def request_img(url: str) -> tuple:  # Tuple[Optional[str], Optional[str]]
