@@ -41,6 +41,9 @@ COLOR_START_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hw
 COLOR_FUNCTION_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
 IMAGE_URI_PATTERN = re.compile(r'\bdata:image/(?:png|jpeg|gif|png|svg\+xml|webp|avif)(;base64)?,[A-Za-z0-9+/=]+|\bhttps?://[A-Za-z0-9\-\._~:/?#\[\]@!$&\'()*+,;%=]+\b|(?:[A-Za-z]:)?[^\s:*?"<>|]+\.(?:png|jpg|jpeg|gif|bmp|svg|webp|avif)\b')
 
+FILE_PREFIX = 'file://'
+DATA_PREFIX = 'data:'
+
 POPUP_FLAGS = sublime.HIDE_ON_MOUSE_MOVE_AWAY
 
 quickview_template = '''
@@ -602,14 +605,9 @@ def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_e
     image_popup(view, region, width, height, data_uri, name, on_pre_show_popup, on_hide_popup)
 
 def image_popup(view: sublime.View, region: sublime.Region, width: int, height: int, src: str, name: str, on_pre_show_popup, on_hide_popup) -> None:
-    FILE_PREFIX = 'file://'
-    DATA_PREFIX = 'data:'
+    sublime_version = int(sublime.version())
     def on_navigate(href: str) -> None:
-        if href.startswith(FILE_PREFIX):
-            sublime.active_window().open_file(href[len(FILE_PREFIX):])
-        elif href.startswith(DATA_PREFIX) and int(sublime.version()) >= 4065:
-            contents = '<div style="text-align: center;"><img src="{}" /></div>'.format(href)
-            sublime.active_window().new_html_sheet(name, contents)
+        sublime.active_window().open_file(href[len(FILE_PREFIX):])
     device_scale_factor = EM_SCALE_FACTOR * view.em_width()
     scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
     settings = sublime.load_settings(SETTINGS_FILE)
@@ -617,13 +615,17 @@ def image_popup(view: sublime.View, region: sublime.Region, width: int, height: 
     popup_width = scaled_width + int(2 * popup_border_width * device_scale_factor)
     label = image_size_label(width, height)
     if 'open_image_button' in settings.get('popup_style'):
-        if src.startswith(FILE_PREFIX) or src.startswith(DATA_PREFIX) and int(sublime.version()) >= 4065:
-            label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">❐</a>'.format(src)
+        if src.startswith(FILE_PREFIX) or src.startswith(DATA_PREFIX) and sublime_version >= 4096:
+            href = sublime.command_url('quick_view_open_image', {'href': src, 'name': name}) if sublime_version >= 4096 else src
+            label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">❐</a>'.format(href)
     location = popup_location(view, region, popup_width)
     img_preview = '<img src="{}" width="{}" height="{}" /><div class="img-label">{}</div>'.format(src, scaled_width, scaled_height, label)
     content = format_template(view, popup_width, img_preview)
     on_pre_show_popup(region)
-    view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, on_navigate, on_hide_popup)
+    if sublime_version >= 4096:
+        view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
+    else:
+        view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, on_navigate, on_hide_popup)
 
 def rgb_color_swatch(view: sublime.View, region: sublime.Region, on_pre_show_popup, on_hide_popup) -> None:
     popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
@@ -925,3 +927,20 @@ class QuickViewCommand(sublime_plugin.TextCommand):
 
     def set_popup_inactive(self) -> None:
         self.popup_active = False
+
+
+class QuickViewOpenImageCommand(sublime_plugin.WindowCommand):
+    def run(self, event: dict, href: str, name: str) -> None:
+        assert int(sublime.version()) >= 4096, 'This command only works on ST build 4096 or newer'
+        flags = sublime.FORCE_GROUP
+        if 'primary' in event['modifier_keys']:
+            flags |= sublime.ADD_TO_SELECTION | sublime.SEMI_TRANSIENT
+        if href.startswith(FILE_PREFIX):
+            path = href[len(FILE_PREFIX):]
+            sublime.active_window().open_file(path, flags)
+        elif href.startswith(DATA_PREFIX):
+            contents = '<div style="text-align: center;"><img src="{}" /></div>'.format(href)
+            sublime.active_window().new_html_sheet(name, contents, flags)
+
+    def want_event(self) -> bool:
+        return True
