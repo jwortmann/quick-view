@@ -40,22 +40,22 @@
               "type": "string",
               "default": "",
               "enum": ["", "magick"],
-              "markdownEnumDescriptions": ["not enabled", "ImageMagick"],
-              "markdownDescription": "Image converter program for the AVIF file format.\n\nSupported options are:\n- \"magick\" (ImageMagick)"
+              "markdownEnumDescriptions": ["disabled", "ImageMagick"],
+              "markdownDescription": "Image converter program for the AVIF file format.\n\nSupported options are:\n\n- \"magick\" (ImageMagick)"
             },
             "svg_converter": {
               "type": "string",
               "default": "",
               "enum": ["", "inkscape", "magick"],
-              "markdownEnumDescriptions": ["not enabled", "Inkscape", "ImageMagick"],
-              "markdownDescription": "Image converter program for the SVG file format.\n\nSupported options are:\n- \"inkscape\" (Inkscape)\n- \"magick\" (ImageMagick)"
+              "markdownEnumDescriptions": ["disabled", "Inkscape", "ImageMagick"],
+              "markdownDescription": "Image converter program for the SVG file format.\n\nSupported options are:\n\n- \"inkscape\" (Inkscape)\n- \"magick\" (ImageMagick)"
             },
             "webp_converter": {
               "type": "string",
               "default": "",
               "enum": ["", "dwebp", "magick"],
-              "markdownEnumDescriptions": ["not enabled", "dwebp", "ImageMagick"],
-              "markdownDescription": "Image converter program for the WebP file format.\n\nSupported options are:\n- \"dwebp\" (precompiled WebP decoder from https://developers.google.com/speed/webp/docs/precompiled)\n- \"magick\" (ImageMagick)"
+              "markdownEnumDescriptions": ["disabled", "dwebp", "ImageMagick"],
+              "markdownDescription": "Image converter program for the WebP file format.\n\nSupported options are:\n\n- \"dwebp\" (precompiled WebP decoder from https://developers.google.com/speed/webp/docs/precompiled)\n- \"magick\" (ImageMagick)"
             },
             "popup_border_width": {
               "type": "number",
@@ -69,13 +69,13 @@
                 "enum": ["rounded", "pointer", "open_image_button"],
                 "markdownEnumDescriptions": [
                   "Draw the border with rounded corners.",
-                  "Draw a small pointer triangle above the top border."
+                  "Draw a small pointer triangle above the top border.",
                   "Add a button for image previews to open image in new tab."
                 ],
               },
               "uniqueItems": true,
               "default": ["rounded", "pointer", "open_image_button"],
-              "markdownDescription": "Popup style configuration. Allows to tweak the appearance, e.g. if popup shadows are enabled.\n\nSupported options are:\n- \"rounded\" (draw the border with rounded corners)\n- \"pointer\" (draw a small pointer triangle above the top border)\n- \"open_image_button\" (add a button for image previews to open image in new tab)"
+              "markdownDescription": "Popup style configuration. Allows to tweak the appearance, e.g. if popup shadows are enabled.\n\nSupported options are:\n\n- \"rounded\" (draw the border with rounded corners)\n- \"pointer\" (draw a small pointer triangle above the top border)\n- \"open_image_button\" (add a button for image previews to open image in new tab)"
             }
           }
         }
