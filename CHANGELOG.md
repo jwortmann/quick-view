@@ -1,6 +1,11 @@
 QuickView Changelog
 ===================
 
+v1.4.3 (2022-07-29)
+-------------------
+
+  * Fixed compatibility with coloraide 1.0 dependency.
+
 v1.4.2 (2021-07-14)
 -------------------
 
