@@ -13,6 +13,7 @@ from coloraide import Color
 from colorsys import rgb_to_hls
 from functools import lru_cache
 from socket import timeout
+from typing import Callable, Optional, Tuple
 from .lib import png
 
 
@@ -183,7 +184,7 @@ def format_from_url(url: str) -> int:
     _, file_extension = os.path.splitext(url.lower())
     return FILE_EXTENSION_FORMAT_MAP.get(file_extension) or ImageFormat.UNSUPPORTED
 
-def hex2rgba(color: str) -> tuple:  # Tuple[int, int, int, float]
+def hex2rgba(color: str) -> Tuple[int, int, int, float]:
     """
     Convert hex RGB or RGBA color string into R, G, B, A tuple with integer
     values 0..255 for R, G, B and floating point value [0, 1] for A
@@ -237,7 +238,7 @@ def checkerboard_png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> st
         for _ in range(5):
             pixels.append(row_type2)
     data = io.BytesIO()
-    png.Writer(width=40, height=40, greyscale=False).write(data, pixels)
+    png.Writer(width=40, height=40, greyscale=False).write(data, pixels)  # pyright: ignore[reportGeneralTypeIssues]
     data.seek(0)
     return b64encode(data.getvalue()).decode('ascii')
 
@@ -270,7 +271,7 @@ def popup_location(view: sublime.View, region: sublime.Region, popup_width: int)
             horizontal_correction = 1  # shift 1 character to the right to ensure that the popup doesn't point to the left side of potential string punctuation
     return view.layout_to_text((x, ay)) + horizontal_correction
 
-def scale_image(width: int, height: int, device_scale_factor: float) -> tuple:  # Tuple[int, int]
+def scale_image(width: int, height: int, device_scale_factor: float) -> Tuple[int, int]:
     """
     Scale image such that:
     - aspect ratio gets preserved
@@ -307,7 +308,7 @@ def format_template(view: sublime.View, popup_width: int, content: str) -> str:
         content=content)
 
 @lru_cache(maxsize=16)
-def request_img(url: str) -> tuple:  # Tuple[Optional[str], Optional[str]]
+def request_img(url: str) -> Tuple[Optional[str], Optional[bytes]]:
     try:
         logging.debug('requesting image from %s', url)
         with urllib.request.urlopen(url, timeout=2) as response:
@@ -380,7 +381,7 @@ def convert_file2png(path: str, input_format: int, converter: str) -> bytes:
         raise ValueError('unknown converter {} or incompatible image format'.format(converter))
     return png
 
-def image_size(data) -> tuple:  # Tuple[int, int]
+def image_size(data) -> Tuple[int, int]:
     """
     Extract image width and height from the file header
     """
@@ -428,7 +429,7 @@ def image_size(data) -> tuple:  # Tuple[int, int]
     return width, height
 
 # @see https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
-def parse_data_uri(uri: str) -> tuple:  # Tuple[str, str]
+def parse_data_uri(uri: str) -> Tuple[str, bytes]:
     if not uri.startswith('data:') or ',' not in uri:
         raise ValueError('invalid data uri')
     media_type, _, raw_data = uri[5:].partition(',')
@@ -477,7 +478,7 @@ def requires_missing_converter(settings: sublime.Settings, image_format: int) ->
         return True
     return False
 
-def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.Settings, extensionless_image_preview: bool, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.Settings, extensionless_image_preview: bool, show_errors: bool, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     url = view.substr(region)
     # remove possible string quotes
     if view.match_selector(region.a, 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
@@ -504,7 +505,7 @@ def image_preview(view: sublime.View, region: sublime.Region, settings: sublime.
                 path = expand_local_path(view, url)
                 sublime.set_timeout_async(lambda: local_image_popup(view, region, path, show_errors, on_pre_show_popup, on_hide_popup))
 
-def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: str, show_errors: bool, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     """
     Show an image popup for a data URI
     """
@@ -551,7 +552,7 @@ def data_uri_image_popup(view: sublime.View, region: sublime.Region, data_uri: s
     name = 'data URI image ({})'.format(IMAGE_FORMAT_NAMES[MIME_TYPE_FORMAT_MAP[mime]])
     image_popup(view, region, width, height, data_uri, name, on_pre_show_popup, on_hide_popup)
 
-def local_image_popup(view: sublime.View, region: sublime.Region, path: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def local_image_popup(view: sublime.View, region: sublime.Region, path: str, show_errors: bool, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     """
     Show an image popup for a local file with absolute or relative file path
     """
@@ -578,7 +579,7 @@ def local_image_popup(view: sublime.View, region: sublime.Region, path: str, sho
     name = os.path.basename(path)
     image_popup(view, region, width, height, src, name, on_pre_show_popup, on_hide_popup)
 
-def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_errors: bool, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     """
     Show an image popup for a internet URL
     """
@@ -604,7 +605,7 @@ def web_image_popup(view: sublime.View, region: sublime.Region, url: str, show_e
     data_uri = data_uri_template.format(mime, data_base64)
     image_popup(view, region, width, height, data_uri, name, on_pre_show_popup, on_hide_popup)
 
-def image_popup(view: sublime.View, region: sublime.Region, width: int, height: int, src: str, name: str, on_pre_show_popup, on_hide_popup) -> None:
+def image_popup(view: sublime.View, region: sublime.Region, width: int, height: int, src: str, name: str, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     sublime_version = int(sublime.version())
     def on_navigate(href: str) -> None:
         sublime.active_window().open_file(href[len(FILE_PREFIX):])
@@ -627,7 +628,7 @@ def image_popup(view: sublime.View, region: sublime.Region, width: int, height: 
     else:
         view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, on_navigate, on_hide_popup)
 
-def rgb_color_swatch(view: sublime.View, region: sublime.Region, on_pre_show_popup, on_hide_popup) -> None:
+def rgb_color_swatch(view: sublime.View, region: sublime.Region, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
     popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * view.em_width())
     location = popup_location(view, region, popup_width)
@@ -636,7 +637,7 @@ def rgb_color_swatch(view: sublime.View, region: sublime.Region, on_pre_show_pop
     on_pre_show_popup(region)
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
-def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int, b: int, a: float, on_pre_show_popup, on_hide_popup) -> None:
+def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int, b: int, a: float, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     # ensure RGB values are in range 0..255
     for val in [r, g, b]:
         if val not in range(0, 256):
@@ -667,7 +668,7 @@ def rgba_color_swatch(view: sublime.View, region: sublime.Region, r: int, g: int
     on_pre_show_popup(region)
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
-def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     """
     Display preview for custom properties (variables) in CSS
     """
@@ -697,15 +698,15 @@ def css_custom_property_color_swatch(view: sublime.View, region: sublime.Region,
     mcolor = Color.match(text, fullmatch=True)  # fullmatch=True ensures that the custom property is only a color
     if mcolor is not None:
         mcolor.color.convert('srgb', in_place=True)  # type: ignore
-        r = int(255 * mcolor.color.red)
-        g = int(255 * mcolor.color.green)
-        b = int(255 * mcolor.color.blue)
-        a = mcolor.color.alpha
+        r = int(255 * mcolor.color["red"])
+        g = int(255 * mcolor.color["green"])
+        b = int(255 * mcolor.color["blue"])
+        a = mcolor.color["alpha"]
         rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
         return
     status_message(view, show_errors, msg)
 
-def variable_color_swatch(view: sublime.View, region: sublime.Region, definition_scope_selector: str, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def variable_color_swatch(view: sublime.View, region: sublime.Region, definition_scope_selector: str, show_errors: bool, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     """
     Display preview for color variable in Sass, SCSS & Less
     """
@@ -732,15 +733,15 @@ def variable_color_swatch(view: sublime.View, region: sublime.Region, definition
     mcolor = Color.match(text)
     if mcolor is not None:
         mcolor.color.convert('srgb', in_place=True)  # type: ignore
-        r = int(255 * mcolor.color.red)
-        g = int(255 * mcolor.color.green)
-        b = int(255 * mcolor.color.blue)
-        a = mcolor.color.alpha
+        r = int(255 * mcolor.color["red"])
+        g = int(255 * mcolor.color["green"])
+        b = int(255 * mcolor.color["blue"])
+        a = mcolor.color["alpha"]
         rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
         return
     status_message(view, show_errors, msg)
 
-def sublime_variable_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup, on_hide_popup) -> None:
+def sublime_variable_color_swatch(view: sublime.View, region: sublime.Region, show_errors: bool, on_pre_show_popup: Callable[[sublime.Region], None], on_hide_popup: Callable[[], None]) -> None:
     """
     Display preview for color variables in Sublime resource files (JSON)
     """
@@ -769,10 +770,10 @@ def sublime_variable_color_swatch(view: sublime.View, region: sublime.Region, sh
         mcolor = Color.match(value, fullmatch=True)  # @todo Also support minihtml color() mod function
         if mcolor is not None:
             mcolor.color.convert('srgb', in_place=True)  # type: ignore
-            r = int(255 * mcolor.color.red)
-            g = int(255 * mcolor.color.green)
-            b = int(255 * mcolor.color.blue)
-            a = mcolor.color.alpha
+            r = int(255 * mcolor.color["red"])
+            g = int(255 * mcolor.color["green"])
+            b = int(255 * mcolor.color["blue"])
+            a = mcolor.color["alpha"]
             rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
             return
     status_message(view, show_errors, 'No valid color could be identified for variable {}'.format(variable_name))
@@ -827,10 +828,10 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
                             mcolor = Color.match(view.substr(region), fullmatch=True)  # https://facelessuser.github.io/coloraide/color/#color-matching
                             if mcolor is not None:
                                 mcolor.color.convert('srgb', in_place=True)  # type: ignore
-                                r = int(255 * mcolor.color.red)
-                                g = int(255 * mcolor.color.green)
-                                b = int(255 * mcolor.color.blue)
-                                a = mcolor.color.alpha
+                                r = int(255 * mcolor.color["red"])
+                                g = int(255 * mcolor.color["green"])
+                                b = int(255 * mcolor.color["blue"])
+                                a = mcolor.color["alpha"]
                                 rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
                                 return
                         elif view.match_selector(region.a, 'support.function.gradient'):
@@ -909,10 +910,10 @@ class QuickViewCommand(sublime_plugin.TextCommand):
                     if mcolor is not None and (not is_empty_selection or point - offset <= mcolor.end):  # type: ignore
                         color_region = sublime.Region(offset + mcolor.start, offset + mcolor.end)  # type: ignore
                         mcolor.color.convert('srgb', in_place=True)  # type: ignore
-                        r = int(255 * mcolor.color.red)
-                        g = int(255 * mcolor.color.green)
-                        b = int(255 * mcolor.color.blue)
-                        a = mcolor.color.alpha
+                        r = int(255 * mcolor.color["red"])
+                        g = int(255 * mcolor.color["green"])
+                        b = int(255 * mcolor.color["blue"])
+                        a = mcolor.color["alpha"]
                         rgba_color_swatch(self.view, color_region, r, g, b, a, self.set_popup_active, self.set_popup_inactive)
                         return
                 else:
