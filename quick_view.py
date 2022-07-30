@@ -930,11 +930,18 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
                 rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGB_LITERAL):
                 region = view.extract_scope(point)
-                if region.a > 0 and region.size() in [3, 6] and view.substr(region.a - 1) == '#':  # fix for unconventional scopes from SCSS package
+                # fix for punctuation scope from default CSS package
+                if region.size() == 1:
+                    region = view.extract_scope(point + 1)
+                # fix for unconventional scopes from SCSS package
+                elif region.a > 0 and region.size() in [3, 6] and view.substr(region.a - 1) == '#':
                     region.a -= 1
                 rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGBA_LITERAL):
                 region = view.extract_scope(point)
+                # fix for punctuation scope from default CSS package
+                if region.size() == 1:
+                    region = view.extract_scope(point + 1)
                 r, g, b, a = hex2rgba(view.substr(region))
                 rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
             elif view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
