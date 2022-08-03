@@ -221,6 +221,20 @@ def hex2rgba(color: str) -> Tuple[int, int, int, float]:
     return r, g, b, a
 
 
+def match_color(text: str, fullmatch: bool = False) -> Optional[Tuple[int, int, int, float]]:
+    # https://facelessuser.github.io/coloraide/color/#color-matching
+    mcolor = Color.match(text, fullmatch=fullmatch)
+    if mcolor is not None:
+        mcolor.color.convert('srgb', in_place=True)
+        r = int(255 * mcolor.color['red'])
+        g = int(255 * mcolor.color['green'])
+        b = int(255 * mcolor.color['blue'])
+        a = mcolor.color['alpha']
+        return r, g, b, a
+    else:
+        return None
+
+
 @lru_cache(maxsize=128)
 def checkerboard_png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> str:
     """
@@ -534,8 +548,8 @@ def image_preview(
     settings: sublime.Settings,
     extensionless_image_preview: bool,
     show_errors: bool,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     url = view.substr(region)
     # remove possible string quotes
@@ -569,8 +583,8 @@ def data_uri_image_popup(
     region: sublime.Region,
     data_uri: str,
     show_errors: bool,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     """
     Show an image popup for a data URI
@@ -624,8 +638,8 @@ def local_image_popup(
     region: sublime.Region,
     path: str,
     show_errors: bool,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     """
     Show an image popup for a local file with absolute or relative file path
@@ -659,8 +673,8 @@ def web_image_popup(
     region: sublime.Region,
     url: str,
     show_errors: bool,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     """
     Show an image popup for a internet URL
@@ -695,8 +709,8 @@ def image_popup(
     height: int,
     src: str,
     name: str,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     sublime_version = int(sublime.version())
     def on_navigate(href: str) -> None:
@@ -714,7 +728,8 @@ def image_popup(
     location = popup_location(view, region, popup_width)
     img_preview = '<img src="{}" width="{}" height="{}" /><div class="img-label">{}</div>'.format(src, scaled_width, scaled_height, label)
     content = format_template(view, popup_width, img_preview)
-    on_pre_show_popup(region)
+    if on_pre_show_popup is not None:
+        on_pre_show_popup(region)
     if sublime_version >= 4096:
         view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
     else:
@@ -724,15 +739,16 @@ def image_popup(
 def rgb_color_swatch(
     view: sublime.View,
     region: sublime.Region,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
     popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * view.em_width())
     location = popup_location(view, region, popup_width)
     color_swatch = '<div class="color-swatch" style="background-color: {}"></div>'.format(view.substr(region))
     content = format_template(view, popup_width, color_swatch)
-    on_pre_show_popup(region)
+    if on_pre_show_popup is not None:
+        on_pre_show_popup(region)
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
 
@@ -743,8 +759,8 @@ def rgba_color_swatch(
     g: int,
     b: int,
     a: float,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     # ensure RGB values are in range 0..255
     for val in [r, g, b]:
@@ -773,7 +789,8 @@ def rgba_color_swatch(
         scaled_width = int(40 * device_scale_factor)
         color_swatch = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
     content = format_template(view, popup_width, color_swatch)
-    on_pre_show_popup(region)
+    if on_pre_show_popup is not None:
+        on_pre_show_popup(region)
     view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
 
 
@@ -781,8 +798,8 @@ def css_custom_property_color_swatch(
     view: sublime.View,
     region: sublime.Region,
     show_errors: bool,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     """
     Display preview for custom properties (variables) in CSS
@@ -810,14 +827,9 @@ def css_custom_property_color_swatch(
         return
     value_region = sublime.Region(a, b)
     text = re.split('[;}]', view.substr(value_region))[0].strip()
-    mcolor = Color.match(text, fullmatch=True)  # fullmatch=True ensures that the custom property value is only a color
-    if mcolor is not None:
-        mcolor.color.convert('srgb', in_place=True)
-        r = int(255 * mcolor.color["red"])
-        g = int(255 * mcolor.color["green"])
-        b = int(255 * mcolor.color["blue"])
-        a = mcolor.color["alpha"]
-        rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
+    color = match_color(text, fullmatch=True)
+    if color is not None:
+        rgba_color_swatch(view, region, *color, on_pre_show_popup=on_pre_show_popup, on_hide_popup=on_hide_popup)
         return
     status_message(view, show_errors, msg)
 
@@ -827,8 +839,8 @@ def variable_color_swatch(
     region: sublime.Region,
     definition_scope_selector: str,
     show_errors: bool,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     """
     Display preview for color variable in Sass, SCSS & Less
@@ -853,14 +865,9 @@ def variable_color_swatch(
         return
     value_region = sublime.Region(a, b)
     text = re.split('[;}]', view.substr(value_region))[0].strip()
-    mcolor = Color.match(text)
-    if mcolor is not None:
-        mcolor.color.convert('srgb', in_place=True)
-        r = int(255 * mcolor.color["red"])
-        g = int(255 * mcolor.color["green"])
-        b = int(255 * mcolor.color["blue"])
-        a = mcolor.color["alpha"]
-        rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
+    color = match_color(text)
+    if color is not None:
+        rgba_color_swatch(view, region, *color, on_pre_show_popup=on_pre_show_popup, on_hide_popup=on_hide_popup)
         return
     status_message(view, show_errors, msg)
 
@@ -869,8 +876,8 @@ def sublime_variable_color_swatch(
     view: sublime.View,
     region: sublime.Region,
     show_errors: bool,
-    on_pre_show_popup: Callable[[sublime.Region], None],
-    on_hide_popup: Callable[[], None]
+    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
+    on_hide_popup: Optional[Callable[[], None]] = None
 ) -> None:
     """
     Display preview for color variables in Sublime resource files (JSON)
@@ -897,14 +904,9 @@ def sublime_variable_color_swatch(
             pass
     if isinstance(value, str):
         # TODO Also support minihtml color() mod function
-        mcolor = Color.match(value, fullmatch=True)
-        if mcolor is not None:
-            mcolor.color.convert('srgb', in_place=True)
-            r = int(255 * mcolor.color["red"])
-            g = int(255 * mcolor.color["green"])
-            b = int(255 * mcolor.color["blue"])
-            a = mcolor.color["alpha"]
-            rgba_color_swatch(view, region, r, g, b, a, on_pre_show_popup, on_hide_popup)
+        color = match_color(value, fullmatch=True)
+        if color is not None:
+            rgba_color_swatch(view, region, *color, on_pre_show_popup=on_pre_show_popup, on_hide_popup=on_hide_popup)
             return
     status_message(view, show_errors, 'No valid color could be identified for variable {}'.format(variable_name))
 
@@ -962,15 +964,9 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
                     if region.contains(point):
                         logging.debug(view.substr(region))
                         if view.match_selector(region.a, 'support.function.color'):
-                            # https://facelessuser.github.io/coloraide/color/#color-matching
-                            mcolor = Color.match(view.substr(region), fullmatch=True)
-                            if mcolor is not None:
-                                mcolor.color.convert('srgb', in_place=True)
-                                r = int(255 * mcolor.color["red"])
-                                g = int(255 * mcolor.color["green"])
-                                b = int(255 * mcolor.color["blue"])
-                                a = mcolor.color["alpha"]
-                                rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
+                            color = match_color(view.substr(region), fullmatch=True)
+                            if color is not None:
+                                rgba_color_swatch(view, region, *color, on_pre_show_popup=self.set_active_region, on_hide_popup=self.reset_active_region)
                                 return
                         # elif view.match_selector(region.a, 'support.function.gradient'):
                         #     if view.substr(region).startswith('linear-gradient'):
@@ -1045,11 +1041,12 @@ class QuickViewCommand(sublime_plugin.TextCommand):
                     if mcolor is not None and (not is_empty_selection or point - offset <= mcolor.end):
                         color_region = sublime.Region(offset + mcolor.start, offset + mcolor.end)
                         mcolor.color.convert('srgb', in_place=True)
-                        r = int(255 * mcolor.color["red"])
-                        g = int(255 * mcolor.color["green"])
-                        b = int(255 * mcolor.color["blue"])
-                        a = mcolor.color["alpha"]
-                        rgba_color_swatch(self.view, color_region, r, g, b, a, self.set_popup_active, self.set_popup_inactive)
+                        r = int(255 * mcolor.color['red'])
+                        g = int(255 * mcolor.color['green'])
+                        b = int(255 * mcolor.color['blue'])
+                        a = mcolor.color['alpha']
+                        rgba_color_swatch(self.view, color_region, r, g, b, a, on_pre_show_popup=self.set_popup_active,
+                            on_hide_popup=self.set_popup_inactive)
                         return
                 else:
                     break
