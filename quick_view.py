@@ -1,3 +1,10 @@
+from base64 import b64encode, b64decode
+from coloraide import Color
+from colorsys import rgb_to_hls
+from functools import lru_cache, partial
+from socket import timeout
+from typing import Optional, Tuple
+from .lib import png
 import io
 import logging
 import os
@@ -7,14 +14,6 @@ import sublime
 import sublime_plugin
 import subprocess
 import urllib.parse, urllib.request
-
-from base64 import b64encode, b64decode
-from coloraide import Color
-from colorsys import rgb_to_hls
-from functools import lru_cache
-from socket import timeout
-from typing import Callable, Optional, Tuple
-from .lib import png
 
 
 SETTINGS_FILE = 'QuickView.sublime-settings'
@@ -42,12 +41,9 @@ COLOR_START_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hw
 COLOR_FUNCTION_PATTERN = re.compile(r'(?i)(?:\b(?<![-#&$])(?:color|hsla?|lch|lab|hwb|rgba?)\([^)]+\))')
 IMAGE_URI_PATTERN = re.compile(r'\bdata:image/(?:png|jpeg|gif|png|svg\+xml|webp|avif)(;base64)?,[A-Za-z0-9+/=]+|\bhttps?://[A-Za-z0-9\-\._~:/?#\[\]@!$&\'()*+,;%=]+\b|(?:[A-Za-z]:)?[^\s:*?"<>|]+\.(?:png|jpg|jpeg|gif|bmp|svg|webp|avif)\b')
 
-FILE_PREFIX = 'file://'
-DATA_PREFIX = 'data:'
+DATA_URI_TEMPLATE = 'data:{};base64,{}'
 
-POPUP_FLAGS = sublime.HIDE_ON_MOUSE_MOVE_AWAY
-
-quickview_template = '''
+POPUP_TEMPLATE = '''
     <body id="quick-view">
         <style>
             html.light {{
@@ -112,8 +108,6 @@ quickview_template = '''
         <div class="border">{content}</div>
     </body>
 '''
-
-data_uri_template = 'data:{};base64,{}'
 
 
 class ImageFormat:
@@ -182,13 +176,19 @@ MIME_TYPE_FORMAT_MAP = {
     MimeType.AVIF: ImageFormat.AVIF
 }
 
+CONVERTER_SETTING = {
+    ImageFormat.SVG: 'svg_converter',
+    ImageFormat.WEBP: 'webp_converter',
+    ImageFormat.AVIF: 'avif_converter'
+}
 
-def format_from_url(url: str) -> int:
+
+def format_from_uri(uri: str) -> int:
     """
-    Returns the image format for a given URL string based on its file extension
+    Returns the image format for a given URI string based on its file extension
     """
-    _, file_extension = os.path.splitext(url.lower())
-    return FILE_EXTENSION_FORMAT_MAP.get(file_extension) or ImageFormat.UNSUPPORTED
+    _, file_extension = os.path.splitext(uri.lower())
+    return FILE_EXTENSION_FORMAT_MAP.get(file_extension, ImageFormat.UNSUPPORTED)
 
 
 def hex2rgba(color: str) -> Tuple[int, int, int, float]:
@@ -221,9 +221,9 @@ def hex2rgba(color: str) -> Tuple[int, int, int, float]:
     return r, g, b, a
 
 
-def match_color(text: str, fullmatch: bool = False) -> Optional[Tuple[int, int, int, float]]:
+def match_color(string: str, start: int = 0, fullmatch: bool = False) -> Optional[Tuple[int, int, int, float]]:
     # https://facelessuser.github.io/coloraide/color/#color-matching
-    mcolor = Color.match(text, fullmatch=fullmatch)
+    mcolor = Color.match(string, start=start, fullmatch=fullmatch)
     if mcolor is not None:
         mcolor.color.convert('srgb', in_place=True)
         r = int(255 * mcolor.color['red'])
@@ -265,41 +265,6 @@ def checkerboard_png(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> st
     return b64encode(data.getvalue()).decode('ascii')
 
 
-def popup_location(view: sublime.View, region: sublime.Region, popup_width: int) -> int:
-    """
-    Calculate popup location such that:
-    - the popup points the region
-    - the popup is fully contained within the view and doesn't overlap with the window border, unless this contradicts
-      with the previous rule
-    - the popup points to the center of the region, unless this contradicts with the previous rule
-    """
-    ax, ay = view.text_to_layout(region.a)
-    bx, _ = view.text_to_layout(region.b)
-    # minimum x-pos so that the popup is still contained within the view
-    view_ax = view.viewport_position()[0]
-    # maximum x-pos so that the popup is still contained within the view
-    view_bx = view_ax + view.viewport_extent()[0] - popup_width
-    # minimum x-pos so that the popup still points at the link region
-    link_ax = ax - popup_width / 2
-    # maximum x-pos so that the popup still points at the link region
-    link_bx = bx - popup_width / 2
-    x = (ax + bx - popup_width) / 2
-    horizontal_correction = 0
-    if x < view_ax:  # restrict popup position to active viewport (left side)
-        x = view_ax
-        horizontal_correction = 1  # add padding between popup and left window border
-        if x > link_bx:  # restrict popup position to link
-            x = link_bx
-            horizontal_correction = -1  # add padding between popup and right link boundary
-    if x > view_bx:  # restrict popup position to active viewport (right side)
-        x = view_bx
-        horizontal_correction = -1  # add padding between popup and right window border
-        if x < link_ax:  # restrict popup position to link
-            x = link_ax
-            horizontal_correction = 1  # add padding between popup and left link boundary
-    return view.layout_to_text((x, ay)) + horizontal_correction
-
-
 def scale_image(width: int, height: int, device_scale_factor: float) -> Tuple[int, int]:
     """
     Scale image such that:
@@ -319,25 +284,6 @@ def scale_image(width: int, height: int, device_scale_factor: float) -> Tuple[in
 
 def image_size_label(width: int, height: int) -> str:
     return '{} \u00d7 {} pixels'.format(width, height) if width != -1 else 'unknown size'
-
-
-def format_template(view: sublime.View, popup_width: int, content: str) -> str:
-    popup_style = sublime.load_settings(SETTINGS_FILE).get('popup_style')
-    bubble = '<div class="preview-bubble bubble-above"></div>' if 'pointer' in popup_style else ''
-    popup_border_radius = 0.3 if 'rounded' in popup_style else 0
-    margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * view.em_width()
-    popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-    label_top_margin = 1 if int(sublime.version()) >= 4000 else 0
-    popup_shadows = sublime.load_settings('Preferences.sublime-settings').get('popup_shadows', False)
-    background = 'color(var(--background) lightness(- 1.2%))' if popup_shadows else 'var(--background)'
-    return quickview_template.format(
-        background=background,
-        margin=margin,
-        border=popup_border_width,
-        border_radius=popup_border_radius,
-        label_top_margin=label_top_margin,
-        bubble=bubble,
-        content=content)
 
 
 @lru_cache(maxsize=16)
@@ -488,7 +434,7 @@ def image_size(data) -> Tuple[int, int]:
     return width, height
 
 
-# @see https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
+# https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
 def parse_data_uri(uri: str) -> Tuple[str, bytes]:
     if not uri.startswith('data:') or ',' not in uri:
         raise ValueError('invalid data uri')
@@ -498,480 +444,452 @@ def parse_data_uri(uri: str) -> Tuple[str, bytes]:
     return mime, data
 
 
-def expand_local_path(view: sublime.View, url: str) -> str:
-    path_aliases = sublime.load_settings(SETTINGS_FILE).get('path_aliases')
-    path, filename = os.path.split(url)  # split filename from path to prevent to expand variables within the filename
-    window = view.window()
-    variables = window.extract_variables() if window else {}
-    for alias, replacement in path_aliases.items():
-        if path.startswith(alias):
-            replacement = sublime.expand_variables(replacement, variables)
-            path = path.replace(alias, replacement, 1)
-            break
-    path = os.path.join(path, filename)  # join back together
-    if os.path.isabs(path):
-        return path
-    else:
-        file_name = view.file_name()
-        if not file_name:
-            return ''
-        else:
-            return os.path.abspath(os.path.join(os.path.dirname(file_name), path))
-
-
-def status_message(view: sublime.View, show: bool, msg: str) -> None:
-    """
-    Show a message in the status bar, but only if the parameter `show` is True.
-    This allows to reuse the same functions, but only show potential error messages
-    if preview popups are invoked from the command palette or a keybinding, but not
-    on mouse hover.
-    """
-    if show:
-        window = view.window()
-        if window:
-            window.status_message(msg)
-
-
-def requires_missing_converter(settings: sublime.Settings, image_format: int) -> bool:
-    if image_format == ImageFormat.SVG and settings.get('svg_converter') not in ('inkscape', 'magick'):
-        return True
-    elif image_format == ImageFormat.WEBP and settings.get('webp_converter') not in ('dwebp', 'magick'):
-        return True
-    elif image_format == ImageFormat.AVIF and settings.get('avif_converter') != 'magick':
-        return True
-    return False
-
-
-def image_preview(
-    view: sublime.View,
-    region: sublime.Region,
-    settings: sublime.Settings,
-    extensionless_image_preview: bool,
-    show_errors: bool,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    url = view.substr(region)
-    # remove possible string quotes
-    if view.match_selector(region.a, 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
-        url = url[1:]
-    if view.match_selector(region.b - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
-        url = url[:-1]
-    # differentiate based on URI scheme
-    if url.startswith('data:'):
-        sublime.set_timeout_async(lambda: data_uri_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
-    else:
-        image_format = format_from_url(url)
-        if requires_missing_converter(settings, image_format):
-            status_message(view, show_errors, 'No valid {} converter set in the package settings'.format(IMAGE_FORMAT_NAMES[image_format]))
-            return
-        if url.lower().startswith(('http:', 'https:', 'ftp:')):
-            if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or (extensionless_image_preview and not url.lower().endswith(IGNORED_FILE_EXTENSIONS)):
-                sublime.set_timeout_async(lambda: web_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
-        elif url.startswith('file://'):  # local absolute path
-            if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
-                url = url[7:]  # 'file://' will be added back in the following function unless image gets converted to data URI
-                sublime.set_timeout_async(lambda: local_image_popup(view, region, url, show_errors, on_pre_show_popup, on_hide_popup))
-        else:  # local relative path
-            if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
-                path = expand_local_path(view, url)
-                sublime.set_timeout_async(lambda: local_image_popup(view, region, path, show_errors, on_pre_show_popup, on_hide_popup))
-
-
-def data_uri_image_popup(
-    view: sublime.View,
-    region: sublime.Region,
-    data_uri: str,
-    show_errors: bool,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    """
-    Show an image popup for a data URI
-    """
-    try:
-        mime, data = parse_data_uri(data_uri)
-    except Exception as ex:
-        logging.debug(ex)
-        status_message(view, show_errors, 'Parsing error for data URI')
-        return
-    if mime == MimeType.SVG:
-        converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
-        try:
-            data = convert_bytes2png(data, ImageFormat.SVG, converter)
-        except Exception as ex:
-            logging.debug(ex)
-            status_message(view, show_errors, 'Conversion error for SVG data URI')
-            return
-        data_base64 = b64encode(data).decode('ascii')
-        data_uri = data_uri_template.format(MimeType.PNG, data_base64)
-    elif mime == MimeType.WEBP:
-        converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
-        try:
-            data = convert_bytes2png(data, ImageFormat.WEBP, converter)
-        except Exception as ex:
-            logging.debug(ex)
-            status_message(view, show_errors, 'Conversion error for WebP data URI')
-            return
-        data_base64 = b64encode(data).decode('ascii')
-        data_uri = data_uri_template.format(MimeType.PNG, data_base64)
-    elif mime == MimeType.AVIF:
-        converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
-        try:
-            data = convert_bytes2png(data, ImageFormat.AVIF, converter)
-        except Exception as ex:
-            logging.debug(ex)
-            status_message(view, show_errors, 'Conversion error for AVIF data URI')
-            return
-        data_base64 = b64encode(data).decode('ascii')
-        data_uri = data_uri_template.format(MimeType.PNG, data_base64)
-    elif mime not in [MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP]:
-        status_message(view, show_errors, 'Mime type {} for data URI not supported'.format(mime))
-        return
-    width, height = image_size(data)
-    name = 'data URI image ({})'.format(IMAGE_FORMAT_NAMES[MIME_TYPE_FORMAT_MAP[mime]])
-    image_popup(view, region, width, height, data_uri, name, on_pre_show_popup, on_hide_popup)
-
-
-def local_image_popup(
-    view: sublime.View,
-    region: sublime.Region,
-    path: str,
-    show_errors: bool,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    """
-    Show an image popup for a local file with absolute or relative file path
-    """
-    if not os.path.isfile(path):
-        status_message(view, show_errors, 'File {} was not found'.format(path))
-        return
-    logging.debug('loading local image from %s', path)
-    image_format = format_from_url(path)
-    if image_format in CONVERTABLE_IMAGE_FORMATS:
-        converter = sublime.load_settings(SETTINGS_FILE).get({ImageFormat.SVG: 'svg_converter', ImageFormat.WEBP: 'webp_converter', ImageFormat.AVIF: 'avif_converter'}[image_format])
-        try:
-            data = convert_file2png(path, image_format, converter)
-        except Exception as ex:
-            logging.debug(ex)
-            status_message(view, show_errors, 'Image conversion error for file {}'.format(path))
-            return
-        width, height = image_size(data)
-        data_base64 = b64encode(data).decode('ascii')
-        src = data_uri_template.format(MimeType.PNG, data_base64)
-    else:
-        with open(path, 'rb') as data:
-            width, height = image_size(data)
-        src = 'file://' + path
-    name = os.path.basename(path)
-    image_popup(view, region, width, height, src, name, on_pre_show_popup, on_hide_popup)
-
-
-def web_image_popup(
-    view: sublime.View,
-    region: sublime.Region,
-    url: str,
-    show_errors: bool,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    """
-    Show an image popup for a internet URL
-    """
-    logging.debug('potential image URL: %s', url)
-    mime, data = request_img(url)
-    if not mime or not data:
-        status_message(view, show_errors, 'QuickView not possible for url {}'.format(url))
-        return
-    image_format = MIME_TYPE_FORMAT_MAP[mime] if mime in MIME_TYPE_FORMAT_MAP else ImageFormat.UNSUPPORTED
-    if image_format in CONVERTABLE_IMAGE_FORMATS:
-        converter = sublime.load_settings(SETTINGS_FILE).get({ImageFormat.SVG: 'svg_converter', ImageFormat.WEBP: 'webp_converter', ImageFormat.AVIF: 'avif_converter'}[image_format])
-        mime = MimeType.PNG
-        try:
-            data = convert_bytes2png(data, image_format, converter)
-        except Exception as ex:
-            logging.debug(ex)
-            status_message(view, show_errors, 'Image conversion error for url {}'.format(url))
-            return
-    width, height = image_size(data)
-    parsed = urllib.parse.urlparse(url)
-    name = os.path.basename(parsed.path)
-    data_base64 = b64encode(data).decode('ascii')
-    data_uri = data_uri_template.format(mime, data_base64)
-    image_popup(view, region, width, height, data_uri, name, on_pre_show_popup, on_hide_popup)
-
-
-def image_popup(
-    view: sublime.View,
-    region: sublime.Region,
-    width: int,
-    height: int,
-    src: str,
-    name: str,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    sublime_version = int(sublime.version())
-    def on_navigate(href: str) -> None:
-        sublime.active_window().open_file(href[len(FILE_PREFIX):])
-    device_scale_factor = EM_SCALE_FACTOR * view.em_width()
-    scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
-    settings = sublime.load_settings(SETTINGS_FILE)
-    popup_border_width = settings.get('popup_border_width')
-    popup_width = scaled_width + int(2 * popup_border_width * device_scale_factor)
-    label = image_size_label(width, height)
-    if 'open_image_button' in settings.get('popup_style'):
-        if src.startswith(FILE_PREFIX) or src.startswith(DATA_PREFIX) and sublime_version >= 4096:
-            href = sublime.command_url('quick_view_open_image', {'href': src, 'name': name}) if sublime_version >= 4096 else src
-            label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">❐</a>'.format(href)
-    location = popup_location(view, region, popup_width)
-    img_preview = '<img src="{}" width="{}" height="{}" /><div class="img-label">{}</div>'.format(src, scaled_width, scaled_height, label)
-    content = format_template(view, popup_width, img_preview)
-    if on_pre_show_popup is not None:
-        on_pre_show_popup(region)
-    if sublime_version >= 4096:
-        view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
-    else:
-        view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, on_navigate, on_hide_popup)
-
-
-def rgb_color_swatch(
-    view: sublime.View,
-    region: sublime.Region,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-    popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * view.em_width())
-    location = popup_location(view, region, popup_width)
-    color_swatch = '<div class="color-swatch" style="background-color: {}"></div>'.format(view.substr(region))
-    content = format_template(view, popup_width, color_swatch)
-    if on_pre_show_popup is not None:
-        on_pre_show_popup(region)
-    view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
-
-
-def rgba_color_swatch(
-    view: sublime.View,
-    region: sublime.Region,
-    r: int,
-    g: int,
-    b: int,
-    a: float,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    # ensure RGB values are in range 0..255
-    for val in [r, g, b]:
-        if val not in range(0, 256):
-            logging.debug('invalid RGB color rgb(%i, %i, %i)', r, g, b)
-            return
-    # ensure alpha value is in range [0, 1]
-    if not 0.0 <= a <= 1.0:
-        logging.debug('invalid alpha value %f', a)
-        return
-    popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-    device_scale_factor = EM_SCALE_FACTOR * view.em_width()
-    popup_width = int((40 + 2 * popup_border_width) * device_scale_factor)
-    location = popup_location(view, region, popup_width)
-    if a == 1.0:
-        color_swatch = '<div class="color-swatch" style="background-color: rgb({}, {}, {})"></div>'.format(r, g, b)
-    else:
-        r0, g0, b0, _ = hex2rgba(view.style()['background'])
-        _, lightness, _ = rgb_to_hls(r0/255, g0/255, b0/255)
-        color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
-        bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
-        bg_black = BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
-        r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
-        r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
-        data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
-        scaled_width = int(40 * device_scale_factor)
-        color_swatch = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
-    content = format_template(view, popup_width, color_swatch)
-    if on_pre_show_popup is not None:
-        on_pre_show_popup(region)
-    view.show_popup(content, POPUP_FLAGS, location, 1024, 1024, None, on_hide_popup)
-
-
-def css_custom_property_color_swatch(
-    view: sublime.View,
-    region: sublime.Region,
-    show_errors: bool,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    """
-    Display preview for custom properties (variables) in CSS
-    """
-    custom_property_name = view.substr(region)
-    definition_regions = [region for region in view.find_by_selector(SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_DEFINITION) if view.substr(region) == custom_property_name]
-    # only proceed if there is exactly 1 definition for the custom property, because this implementation is
-    # not aware of CSS rule scopes or possible inheritance resulting from the HTML structure
-    if len(definition_regions) == 0:
-        status_message(view, show_errors, 'No definition found for custom property {}'.format(custom_property_name))
-        return
-    elif len(definition_regions) > 1:
-        status_message(view, show_errors, 'More than one definition found for custom property {}'.format(custom_property_name))
-        return
-    # extract next token
-    a = view.find(r'\S', definition_regions[0].b).a
-    msg = 'No valid color could be identified for custom property {}'.format(custom_property_name)
-    if view.substr(a) != ':':
-        status_message(view, show_errors, msg)
-        return
-    a += 1
-    b = view.find_by_class(definition_regions[0].b, forward=True, classes=sublime.CLASS_LINE_END)
-    if a >= b:
-        status_message(view, show_errors, msg)
-        return
-    value_region = sublime.Region(a, b)
-    text = re.split('[;}]', view.substr(value_region))[0].strip()
-    color = match_color(text, fullmatch=True)
-    if color is not None:
-        rgba_color_swatch(view, region, *color, on_pre_show_popup=on_pre_show_popup, on_hide_popup=on_hide_popup)
-        return
-    status_message(view, show_errors, msg)
-
-
-def variable_color_swatch(
-    view: sublime.View,
-    region: sublime.Region,
-    definition_scope_selector: str,
-    show_errors: bool,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    """
-    Display preview for color variable in Sass, SCSS & Less
-    """
-    variable_name = view.substr(region)
-    definition_regions = [region for region in view.find_by_selector(definition_scope_selector) if view.substr(region) == variable_name]
-    if len(definition_regions) == 0:
-        status_message(view, show_errors, 'No definition found for variable {}'.format(variable_name))
-        return
-    elif len(definition_regions) > 1:
-        status_message(view, show_errors, 'More than one definition found for variable {}'.format(variable_name))
-        return
-    a = view.find(r'\S', definition_regions[0].b).a
-    msg = 'No valid color could be identified for variable {}'.format(variable_name)
-    if view.substr(a) != ':':
-        status_message(view, show_errors, msg)
-        return
-    a += 1
-    b = view.find_by_class(definition_regions[0].b, forward=True, classes=sublime.CLASS_LINE_END)
-    if a >= b:
-        status_message(view, show_errors, msg)
-        return
-    value_region = sublime.Region(a, b)
-    text = re.split('[;}]', view.substr(value_region))[0].strip()
-    color = match_color(text)
-    if color is not None:
-        rgba_color_swatch(view, region, *color, on_pre_show_popup=on_pre_show_popup, on_hide_popup=on_hide_popup)
-        return
-    status_message(view, show_errors, msg)
-
-
-def sublime_variable_color_swatch(
-    view: sublime.View,
-    region: sublime.Region,
-    show_errors: bool,
-    on_pre_show_popup: Optional[Callable[[sublime.Region], None]] = None,
-    on_hide_popup: Optional[Callable[[], None]] = None
-) -> None:
-    """
-    Display preview for color variables in Sublime resource files (JSON)
-    """
-    filename = view.file_name()
-    variable_name = view.substr(region)
-    value = None
-    if filename:  # search for variable also in overridden files
-        data_path = os.path.dirname(sublime.packages_path())
-        for resource in sublime.find_resources(os.path.basename(filename)):
-            try:
-                is_current_view = os.path.samefile(filename, os.path.join(data_path, resource))
-                # use buffer content for current view, because there can be unsaved changes
-                content = sublime.decode_value(view.substr(sublime.Region(0, view.size()))) if is_current_view else \
-                    sublime.decode_value(sublime.load_resource(resource))
-                value = content['variables'][variable_name]
-            except:
-                pass
-    else:  # search for variable only in current view
-        try:
-            content = sublime.decode_value(view.substr(sublime.Region(0, view.size())))
-            value = content['variables'][variable_name]
-        except:  # @todo Try to resolve variable via scopes like in CSS
-            pass
-    if isinstance(value, str):
-        # TODO Also support minihtml color() mod function
-        color = match_color(value, fullmatch=True)
-        if color is not None:
-            rgba_color_swatch(view, region, *color, on_pre_show_popup=on_pre_show_popup, on_hide_popup=on_hide_popup)
-            return
-    status_message(view, show_errors, 'No valid color could be identified for variable {}'.format(variable_name))
-
-
 class QuickViewHoverListener(sublime_plugin.EventListener):
-    _active_region = None  # type: Optional[sublime.Region]
 
     def on_hover(self, view: sublime.View, point: int, hover_zone: int) -> None:
         if hover_zone != sublime.HOVER_TEXT:
             return
-        # prevent flickering on small mouse movements
-        if self._active_region and self._active_region.contains(point):
+        view.run_command('quick_view', {'point': point})
+
+
+class QuickViewCommand(sublime_plugin.TextCommand):
+    _active_region = None  # type: Optional[sublime.Region]
+
+    def run(self, edit: sublime.Edit, point: Optional[int] = None) -> None:
+        manual = point is None
+        if manual:
+            if self._active_region:
+                self.view.hide_popup()
+                return
+            try:
+                region = self.view.sel()[0]
+                point = region.begin()
+            except IndexError:
+                logging.error('no selections in the active view')
+                return
+            empty_selection = region.empty()
+            if empty_selection:
+                region = self.view.line(point)
+            elif len(self.view.lines(region)) > 1:
+                self.view.window().status_message('QuickView not possible for selections that span multiple lines')  # pyright: ignore[reportOptionalMemberAccess]
+                return
+        elif self._active_region and self._active_region.contains(point):  # prevent flickering on small mouse movements
             return
         settings = sublime.load_settings(SETTINGS_FILE)
-        if view.match_selector(point, settings.get('image_scope_selector')):
-            if not settings.get('image_preview'):
+        if manual or settings.get('image_preview'):
+            if self.view.match_selector(point, settings.get('image_scope_selector')):
+                region = self.view.extract_scope(point)
+                self.image_preview(region, manual)
                 return
-            region = view.extract_scope(point)
-            image_preview(view, region, settings, settings.get('extensionless_image_preview'), False, self.set_active_region, self.reset_active_region)
-        elif settings.get('color_preview'):
-            if view.match_selector(point, SCOPE_SELECTOR_CSS_COLORNAME):
-                region = view.word(point)
-                rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGB_LITERAL):
-                region = view.extract_scope(point)
+        if manual or settings.get('color_preview'):
+            if self.view.match_selector(point, SCOPE_SELECTOR_CSS_COLORNAME):
+                region = self.view.word(point)
+                self.color_preview_rgb(region)
+                return
+            elif self.view.match_selector(point, SCOPE_SELECTOR_CSS_RGB_LITERAL):
+                region = self.view.extract_scope(point)
                 # fix for punctuation scope from default CSS package
                 if region.size() == 1:
-                    region = view.extract_scope(point + 1)
+                    region = self.view.extract_scope(point + 1)
                 # fix for unconventional scopes from SCSS package
-                elif region.a > 0 and region.size() in [3, 6] and view.substr(region.a - 1) == '#':
+                elif region.a > 0 and region.size() in [3, 6] and self.view.substr(region.a - 1) == '#':
                     region.a -= 1
-                rgb_color_swatch(view, region, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, SCOPE_SELECTOR_CSS_RGBA_LITERAL):
-                region = view.extract_scope(point)
+                self.color_preview_rgb(region)
+                return
+            elif self.view.match_selector(point, SCOPE_SELECTOR_CSS_RGBA_LITERAL):
+                region = self.view.extract_scope(point)
                 # fix for punctuation scope from default CSS package
                 if region.size() == 1:
-                    region = view.extract_scope(point + 1)
-                r, g, b, a = hex2rgba(view.substr(region))
-                rgba_color_swatch(view, region, r, g, b, a, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
-                region = view.extract_scope(point)
-                css_custom_property_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, SCOPE_SELECTOR_SASS_VARIABLE_REFERENCE):
-                region = view.extract_scope(point)
-                variable_color_swatch(view, region, SCOPE_SELECTOR_SASS_VARIABLE_DEFINITION, False, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, SCOPE_SELECTOR_LESS_VARIABLE_REFERENCE):
-                region = view.extract_scope(point)
-                variable_color_swatch(view, region, SCOPE_SELECTOR_LESS_VARIABLE_DEFINITION, False, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE):
-                region = view.extract_scope(point)
-                sublime_variable_color_swatch(view, region, False, self.set_active_region, self.reset_active_region)
-            elif view.match_selector(point, SCOPE_SELECTOR_CSS_FUNCTION):
-                regions = view.find_by_selector(SCOPE_SELECTOR_CSS_FUNCTION)
+                    region = self.view.extract_scope(point + 1)
+                color_tuple = hex2rgba(self.view.substr(region))
+                self.color_preview_rgba(region, color_tuple)
+                return
+            elif self.view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
+                region = self.view.extract_scope(point)
+                self.color_preview_css_variable(region, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_DEFINITION, manual)
+                return
+            elif self.view.match_selector(point, SCOPE_SELECTOR_SASS_VARIABLE_DEFINITION):
+                region = self.view.extract_scope(point)
+                self.color_preview_css_variable(region, SCOPE_SELECTOR_SASS_VARIABLE_DEFINITION, manual)
+                return
+            elif self.view.match_selector(point, SCOPE_SELECTOR_LESS_VARIABLE_DEFINITION):
+                region = self.view.extract_scope(point)
+                self.color_preview_css_variable(region, SCOPE_SELECTOR_LESS_VARIABLE_DEFINITION, manual)
+                return
+            elif self.view.match_selector(point, SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE):
+                region = self.view.extract_scope(point)
+                self.color_preview_color_scheme_variable(region, manual)
+                return
+            # scope for CSS functions should be checked last, because the scope also matches for custom properties
+            elif self.view.match_selector(point, SCOPE_SELECTOR_CSS_FUNCTION):
+                regions = self.view.find_by_selector(SCOPE_SELECTOR_CSS_FUNCTION)
                 for region in regions:
                     if region.contains(point):
-                        logging.debug(view.substr(region))
-                        if view.match_selector(region.a, 'support.function.color'):
-                            color = match_color(view.substr(region), fullmatch=True)
-                            if color is not None:
-                                rgba_color_swatch(view, region, *color, on_pre_show_popup=self.set_active_region, on_hide_popup=self.reset_active_region)
+                        logging.debug(self.view.substr(region))
+                        if self.view.match_selector(region.a, 'support.function.color'):
+                            color_tuple = match_color(self.view.substr(region), fullmatch=True)
+                            if color_tuple is not None:
+                                self.color_preview_rgba(region, color_tuple)
                                 return
                         # elif view.match_selector(region.a, 'support.function.gradient'):
                         #     if view.substr(region).startswith('linear-gradient'):
                         #         pass
                         break
+                return
+        if manual:
+            text = self.view.substr(region)  # pyright: ignore[reportUnboundVariable]
+            offset = region.begin()  # pyright: ignore[reportUnboundVariable]
+            for m in IMAGE_URI_PATTERN.finditer(text):
+                # if selection is empty ensure cursor position is within the found region
+                if not empty_selection or m.start() <= point - offset <= m.end():  # pyright: ignore[reportUnboundVariable]
+                    link_region = sublime.Region(offset + m.start(), offset + m.end())
+                    logging.debug('potential image URI found: %s', self.view.substr(link_region))
+                    self.image_preview(region, True)  # pyright: ignore[reportUnboundVariable]
+                    return
+            for m in COLOR_START_PATTERN.finditer(text):
+                if not empty_selection or m.start() <= point - offset:  # pyright: ignore[reportUnboundVariable]
+                    mcolor = Color.match(text, start=m.start())
+                    if mcolor is not None and (not empty_selection or point - offset <= mcolor.end):  # pyright: ignore[reportUnboundVariable]
+                        color_region = sublime.Region(offset + mcolor.start, offset + mcolor.end)
+                        mcolor.color.convert('srgb', in_place=True)
+                        r = int(255 * mcolor.color['red'])
+                        g = int(255 * mcolor.color['green'])
+                        b = int(255 * mcolor.color['blue'])
+                        a = mcolor.color['alpha']
+                        self.color_preview_rgba(color_region, (r, g, b, a))
+                        return
+
+    def expand_local_path(self, path: str) -> str:
+        directory_path, filename = os.path.split(path)  # don't expand variables within the filename
+        variables = self.view.window().extract_variables()  # pyright: ignore[reportOptionalMemberAccess]
+        for alias, replacement in sublime.load_settings(SETTINGS_FILE).get('path_aliases').items():
+            if directory_path.startswith(alias):
+                replacement = sublime.expand_variables(replacement, variables)
+                directory_path = directory_path.replace(alias, replacement, 1)
+                break
+        full_path = os.path.join(directory_path, filename)  # join back together
+        if os.path.isabs(full_path):
+            return full_path
+        else:
+            file_name = self.view.file_name()
+            return os.path.abspath(os.path.join(os.path.dirname(file_name), full_path)) if file_name else ''
+
+    def popup_content(self, content: str, popup_width: int) -> str:
+        popup_style = sublime.load_settings(SETTINGS_FILE).get('popup_style')
+        bubble = '<div class="preview-bubble bubble-above"></div>' if 'pointer' in popup_style else ''
+        popup_border_radius = 0.3 if 'rounded' in popup_style else 0
+        margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * self.view.em_width()
+        popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
+        label_top_margin = 1 if int(sublime.version()) >= 4000 else 0
+        popup_shadows = sublime.load_settings('Preferences.sublime-settings').get('popup_shadows', False)
+        background = 'color(var(--background) lightness(- 1.2%))' if popup_shadows else 'var(--background)'
+        return POPUP_TEMPLATE.format(
+            background=background,
+            margin=margin,
+            border=popup_border_width,
+            border_radius=popup_border_radius,
+            label_top_margin=label_top_margin,
+            bubble=bubble,
+            content=content)
+
+    def popup_location(self, region: sublime.Region, popup_width: int) -> int:
+        ax, ay = self.view.text_to_layout(region.a)
+        bx, _ = self.view.text_to_layout(region.b)
+        # minimum x-pos so that the popup is still contained within the view
+        view_ax = self.view.viewport_position()[0]
+        # maximum x-pos so that the popup is still contained within the view
+        view_bx = view_ax + self.view.viewport_extent()[0] - popup_width
+        # minimum x-pos so that the popup still points at the link region
+        link_ax = ax - popup_width / 2
+        # maximum x-pos so that the popup still points at the link region
+        link_bx = bx - popup_width / 2
+        x = (ax + bx - popup_width) / 2
+        horizontal_correction = 0
+        if x < view_ax:  # restrict popup position to active viewport (left side)
+            x = view_ax
+            horizontal_correction = 1  # add padding between popup and left window border
+            if x > link_bx:  # restrict popup position to link
+                x = link_bx
+                horizontal_correction = -1  # add padding between popup and right link boundary
+        if x > view_bx:  # restrict popup position to active viewport (right side)
+            x = view_bx
+            horizontal_correction = -1  # add padding between popup and right window border
+            if x < link_ax:  # restrict popup position to link
+                x = link_ax
+                horizontal_correction = 1  # add padding between popup and left link boundary
+        return self.view.layout_to_text((x, ay)) + horizontal_correction
+
+    def show_popup(self, region: sublime.Region, content: str) -> None:
+        popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
+        popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * self.view.em_width())
+        location = self.popup_location(region, popup_width)
+        content = self.popup_content(content, popup_width)
+        self.set_active_region(region)
+        self.view.show_popup(
+            content,
+            flags=sublime.HIDE_ON_MOUSE_MOVE_AWAY,
+            location=location,
+            max_width=1024,
+            max_height=1024,
+            on_navigate=None,
+            on_hide=self.reset_active_region)
+
+    def show_image_popup(self, region: sublime.Region, width: int, height: int, src: str, title: str) -> None:
+        sublime_version = int(sublime.version())
+        def on_navigate(href: str) -> None:
+            sublime.active_window().open_file(href[len('file://'):])
+        device_scale_factor = EM_SCALE_FACTOR * self.view.em_width()
+        scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
+        settings = sublime.load_settings(SETTINGS_FILE)
+        popup_border_width = settings.get('popup_border_width')
+        popup_width = scaled_width + int(2 * popup_border_width * device_scale_factor)
+        label = image_size_label(width, height)
+        if 'open_image_button' in settings.get('popup_style'):
+            if src.startswith('file://') or sublime_version >= 4096 and src.startswith('data:'):
+                href = sublime.command_url('quick_view_open_image', {'href': src, 'title': title}) if sublime_version >= 4096 else src
+                label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">❐</a>'.format(href)
+        content = '<img src="{}" width="{}" height="{}" /><div class="img-label">{}</div>'.format(src, scaled_width, scaled_height, label)
+        location = self.popup_location(region, popup_width)
+        content = self.popup_content(content, popup_width)
+        self.set_active_region(region)
+        self.view.show_popup(
+            content,
+            flags=sublime.HIDE_ON_MOUSE_MOVE_AWAY,
+            location=location,
+            max_width=1024,
+            max_height=1024,
+            on_navigate=on_navigate if sublime_version < 4096 else None,
+            on_hide=self.reset_active_region)
+
+    def image_preview(self, region: sublime.Region, show_errors: bool = False) -> None:
+        uri = self.view.substr(region)
+        # remove possible string quotes
+        if self.view.match_selector(region.begin(), 'punctuation.definition.string.begin | punctuation.definition.link.begin'):
+            uri = uri[1:]
+        if self.view.match_selector(region.end() - 1, 'punctuation.definition.string.end | punctuation.definition.link.end'):
+            uri = uri[:-1]
+        if uri.startswith('data:'):
+            sublime.set_timeout_async(partial(self.data_uri_image_preview, region, uri, show_errors))
+        else:
+            image_format = format_from_uri(uri)
+            settings = sublime.load_settings(SETTINGS_FILE)
+            if image_format in CONVERTABLE_IMAGE_FORMATS:
+                setting = CONVERTER_SETTING[image_format]
+                converters = {
+                    ImageFormat.SVG: ('inkscape', 'magick'),
+                    ImageFormat.WEBP: ('dwebp', 'magick'),
+                    ImageFormat.AVIF: ('magick')
+                }[image_format]
+                if settings.get(setting) not in converters:
+                    if show_errors:
+                        self.view.window().status_message('No valid {} converter set in the package settings'.format(IMAGE_FORMAT_NAMES[image_format]))  # pyright: ignore[reportOptionalMemberAccess]
+                    return
+            if uri.lower().startswith(('http:', 'https:', 'ftp:')):
+                if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or \
+                    (settings.get('extensionless_image_preview') and not uri.lower().endswith(IGNORED_FILE_EXTENSIONS)):
+                    sublime.set_timeout_async(partial(self.internet_url_image_preview, region, uri, show_errors))
+            elif uri.startswith('file://'):  # local absolute path
+                if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
+                    sublime.set_timeout_async(partial(self.local_path_image_preview, region, uri[len('file://'):], show_errors))
+            else:  # local relative path
+                if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
+                    sublime.set_timeout_async(partial(self.local_path_image_preview, region, self.expand_local_path(uri), show_errors))
+
+    def data_uri_image_preview(self, region: sublime.Region, data_uri: str, show_errors: bool = False) -> None:
+        try:
+            mime, data = parse_data_uri(data_uri)
+        except Exception as ex:
+            logging.debug(ex)
+            if show_errors:
+                self.view.window().status_message('Parsing error for data URI')  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        if mime in (MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP):
+            pass
+        elif mime == MimeType.SVG:
+            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
+            try:
+                data = convert_bytes2png(data, ImageFormat.SVG, converter)
+            except Exception as ex:
+                logging.debug(ex)
+                if show_errors:
+                    self.view.window().status_message('Conversion error for SVG data URI')  # pyright: ignore[reportOptionalMemberAccess]
+                return
+            data_base64 = b64encode(data).decode('ascii')
+            data_uri = DATA_URI_TEMPLATE.format(MimeType.PNG, data_base64)
+        elif mime == MimeType.WEBP:
+            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
+            try:
+                data = convert_bytes2png(data, ImageFormat.WEBP, converter)
+            except Exception as ex:
+                logging.debug(ex)
+                if show_errors:
+                    self.view.window().status_message('Conversion error for WebP data URI')  # pyright: ignore[reportOptionalMemberAccess]
+                return
+            data_base64 = b64encode(data).decode('ascii')
+            data_uri = DATA_URI_TEMPLATE.format(MimeType.PNG, data_base64)
+        elif mime == MimeType.AVIF:
+            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
+            try:
+                data = convert_bytes2png(data, ImageFormat.AVIF, converter)
+            except Exception as ex:
+                logging.debug(ex)
+                if show_errors:
+                    self.view.window().status_message('Conversion error for AVIF data URI')  # pyright: ignore[reportOptionalMemberAccess]
+                return
+            data_base64 = b64encode(data).decode('ascii')
+            data_uri = DATA_URI_TEMPLATE.format(MimeType.PNG, data_base64)
+        else:
+            if show_errors:
+                self.view.window().status_message('Mime type {} for data URI not supported'.format(mime))  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        width, height = image_size(data)
+        title = 'data URI image ({})'.format(IMAGE_FORMAT_NAMES[MIME_TYPE_FORMAT_MAP[mime]])
+        self.show_image_popup(region, width, height, data_uri, title)
+
+    def internet_url_image_preview(self, region: sublime.Region, url: str, show_errors: bool = False) -> None:
+        logging.debug('potential image URL: %s', url)
+        mime, data = request_img(url)
+        if not mime or not data:
+            if show_errors:
+                self.view.window().status_message('QuickView not possible for URL {}'.format(url))  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        image_format = MIME_TYPE_FORMAT_MAP.get(mime, ImageFormat.UNSUPPORTED)
+        if image_format in CONVERTABLE_IMAGE_FORMATS:
+            converter = sublime.load_settings(SETTINGS_FILE).get(CONVERTER_SETTING[image_format])
+            mime = MimeType.PNG
+            try:
+                data = convert_bytes2png(data, image_format, converter)
+            except Exception as ex:
+                logging.debug(ex)
+                if show_errors:
+                    self.view.window().status_message('Image conversion error for url {}'.format(url))  # pyright: ignore[reportOptionalMemberAccess]
+                return
+        width, height = image_size(data)
+        parsed = urllib.parse.urlparse(url)
+        title = os.path.basename(parsed.path)
+        data_base64 = b64encode(data).decode('ascii')
+        data_uri = DATA_URI_TEMPLATE.format(mime, data_base64)
+        self.show_image_popup(region, width, height, data_uri, title)
+
+    def local_path_image_preview(self, region: sublime.Region, path: str, show_errors: bool = False) -> None:
+        if not os.path.isfile(path):
+            if show_errors:
+                self.view.window().status_message('File {} was not found'.format(path))  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        logging.debug('loading local image from %s', path)
+        image_format = format_from_uri(path)
+        if image_format in CONVERTABLE_IMAGE_FORMATS:
+            converter = sublime.load_settings(SETTINGS_FILE).get({ImageFormat.SVG: 'svg_converter', ImageFormat.WEBP: 'webp_converter', ImageFormat.AVIF: 'avif_converter'}[image_format])
+            try:
+                data = convert_file2png(path, image_format, converter)
+            except Exception as ex:
+                logging.debug(ex)
+                if show_errors:
+                    self.view.window().status_message('Image conversion error for file {}'.format(path))  # pyright: ignore[reportOptionalMemberAccess]
+                return
+            width, height = image_size(data)
+            data_base64 = b64encode(data).decode('ascii')
+            src = DATA_URI_TEMPLATE.format(MimeType.PNG, data_base64)
+        else:
+            with open(path, 'rb') as data:
+                width, height = image_size(data)
+            src = 'file://' + path
+        title = os.path.basename(path)
+        self.show_image_popup(region, width, height, src, title)
+
+    def color_preview_rgb(self, region: sublime.Region) -> None:
+        content = '<div class="color-swatch" style="background-color: {}"></div>'.format(self.view.substr(region))
+        self.show_popup(region, content)
+
+    def color_preview_rgba(self, region: sublime.Region, color_tuple: Tuple[int, int, int, float]) -> None:
+        r, g, b, a = color_tuple
+        # ensure RGB values are in range 0..255
+        if any([val not in range(0, 256) for val in (r, g, b)]):
+            logging.debug('invalid RGB color rgb(%i, %i, %i)', r, g, b)
+            return
+        # ensure alpha value is in range [0, 1]
+        if not 0.0 <= a <= 1.0:
+            logging.debug('invalid alpha value %f', a)
+            return
+        if a == 1.0:
+            content = '<div class="color-swatch" style="background-color: rgb({}, {}, {})"></div>'.format(r, g, b)
+        else:
+            r0, g0, b0, _ = hex2rgba(self.view.style()['background'])
+            _, lightness, _ = rgb_to_hls(r0/255, g0/255, b0/255)
+            color_scheme_type = 'dark' if lightness < 0.5 else 'light'  # https://www.sublimetext.com/docs/minihtml.html#predefined_classes
+            bg_white = BACKGROUND_WHITE_PIXEL[color_scheme_type] * (1 - a)
+            bg_black = BACKGROUND_BLACK_PIXEL[color_scheme_type] * (1 - a)
+            r1, g1, b1 = int(r * a + bg_white), int(g * a + bg_white), int(b * a + bg_white)
+            r2, g2, b2 = int(r * a + bg_black), int(g * a + bg_black), int(b * a + bg_black)
+            data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
+            scaled_width = int(40 * EM_SCALE_FACTOR * self.view.em_width())
+            content = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
+        self.show_popup(region, content)
+
+    def color_preview_css_variable(self, region: sublime.Region, definition_selector: str, show_errors: bool = False) -> None:
+        variable_name = self.view.substr(region)
+        definition_regions = [r for r in self.view.find_by_selector(definition_selector) if self.view.substr(r) == variable_name]
+        # only proceed if there is exactly 1 definition for the variable/custom property, because this implementation is
+        # not aware of CSS rule scopes or possible inheritance resulting from the HTML structure
+        if len(definition_regions) == 0:
+            if show_errors:
+                self.view.window().status_message('No definition found for variable {}'.format(variable_name))  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        elif len(definition_regions) > 1:
+            if show_errors:
+                self.view.window().status_message('More than one definition found for variable {}'.format(variable_name))  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        # extract next token
+        a = self.view.find(r'\S', definition_regions[0].b).a
+        msg = 'No valid color could be identified for variable {}'.format(variable_name)
+        if self.view.substr(a) != ':':
+            if show_errors:
+                self.view.window().status_message(msg)  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        a += 1
+        b = self.view.find_by_class(definition_regions[0].b, forward=True, classes=sublime.CLASS_LINE_END)
+        if a >= b:
+            if show_errors:
+                self.view.window().status_message(msg)  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        value_region = sublime.Region(a, b)
+        text = re.split('[;}]', self.view.substr(value_region))[0].strip()
+        color_tuple = match_color(text, fullmatch=True)
+        if color_tuple is None:
+            if show_errors:
+                self.view.window().status_message(msg)  # pyright: ignore[reportOptionalMemberAccess]
+            return
+        self.color_preview_rgba(region, color_tuple)
+
+    def color_preview_color_scheme_variable(self, region: sublime.Region, show_errors: bool = False) -> None:
+        filename = self.view.file_name()
+        variable_name = self.view.substr(region)
+        value = None
+        if filename:  # search for variable also in overridden files
+            data_path = os.path.dirname(sublime.packages_path())
+            for resource in sublime.find_resources(os.path.basename(filename)):
+                try:
+                    is_current_view = os.path.samefile(filename, os.path.join(data_path, resource))
+                    # use buffer content for current view, because there can be unsaved changes
+                    content = sublime.decode_value(self.view.substr(sublime.Region(0, self.view.size()))) if is_current_view else \
+                        sublime.decode_value(sublime.load_resource(resource))
+                    value = content['variables'][variable_name]
+                except:
+                    pass
+        else:  # search for variable only in current view
+            try:
+                content = sublime.decode_value(self.view.substr(sublime.Region(0, self.view.size())))
+                value = content['variables'][variable_name]
+            except:  # TODO try to resolve variable via scope name like in CSS
+                pass
+        if isinstance(value, str):
+            # TODO also support minihtml color() mod function
+            color_tuple = match_color(value, fullmatch=True)
+            if color_tuple is None:
+                if show_errors:
+                    self.view.window().status_message('No valid color could be identified for variable {}'.format(variable_name))  # pyright: ignore[reportOptionalMemberAccess]
+                return
+            self.color_preview_rgba(region, color_tuple)
 
     def set_active_region(self, region: sublime.Region) -> None:
         self._active_region = region
@@ -980,101 +898,18 @@ class QuickViewHoverListener(sublime_plugin.EventListener):
         self._active_region = None
 
 
-class QuickViewCommand(sublime_plugin.TextCommand):
-    _popup_active = False
-
-    def run(self, edit: sublime.Edit) -> None:
-        if self._popup_active:
-            self.view.hide_popup()
-            return
-        try:
-            region = self.view.sel()[0]  # use first selection in case of multiple cursors
-        except IndexError:
-            logging.error('no selections in the active view')
-            return
-        is_empty_selection = region.empty()
-        if is_empty_selection:
-            point = region.b
-            region = self.view.line(point)
-        elif len(self.view.lines(region)) > 1:
-            window = self.view.window()
-            if window:
-                window.status_message('QuickView not possible for selections that span multiple lines')
-            return
-        else:
-            point = region.begin()
-        settings = sublime.load_settings(SETTINGS_FILE)
-        if is_empty_selection and self.view.match_selector(point, settings.get('image_scope_selector')):
-            region = self.view.extract_scope(point)
-            image_preview(self.view, region, settings, True, True, self.set_popup_active, self.set_popup_inactive)
-            return
-        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_CSS_CUSTOM_PROPERTY_REFERENCE):
-            region = self.view.extract_scope(point)
-            css_custom_property_color_swatch(self.view, region, True, self.set_popup_active, self.set_popup_inactive)
-            return
-        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_SASS_VARIABLE_REFERENCE):
-            region = self.view.extract_scope(point)
-            variable_color_swatch(self.view, region, SCOPE_SELECTOR_SASS_VARIABLE_DEFINITION, True, self.set_popup_active, self.set_popup_inactive)
-            return
-        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_LESS_VARIABLE_REFERENCE):
-            region = self.view.extract_scope(point)
-            variable_color_swatch(self.view, region, SCOPE_SELECTOR_LESS_VARIABLE_DEFINITION, True, self.set_popup_active, self.set_popup_inactive)
-            return
-        elif is_empty_selection and self.view.match_selector(point, SCOPE_SELECTOR_SUBLIME_COLOR_SCHEME_VARIABLE_REFERENCE):
-            region = self.view.extract_scope(point)
-            sublime_variable_color_swatch(self.view, region, True, self.set_popup_active, self.set_popup_inactive)
-            return
-        else:
-            text = self.view.substr(region)
-            offset = region.begin()
-            for m in IMAGE_URI_PATTERN.finditer(text):
-                if not is_empty_selection or m.start() <= point - offset <= m.end():
-                    link_region = sublime.Region(offset + m.start(), offset + m.end())
-                    logging.debug('potential image URI found: %s', self.view.substr(link_region))
-                    image_preview(self.view, link_region, settings, True, True, self.set_popup_active, self.set_popup_inactive)
-                    return
-                else:
-                    break
-            for m in COLOR_START_PATTERN.finditer(text):
-                if not is_empty_selection or m.start() <= point - offset:
-                    mcolor = Color.match(text, start=m.start())
-                    if mcolor is not None and (not is_empty_selection or point - offset <= mcolor.end):
-                        color_region = sublime.Region(offset + mcolor.start, offset + mcolor.end)
-                        mcolor.color.convert('srgb', in_place=True)
-                        r = int(255 * mcolor.color['red'])
-                        g = int(255 * mcolor.color['green'])
-                        b = int(255 * mcolor.color['blue'])
-                        a = mcolor.color['alpha']
-                        rgba_color_swatch(self.view, color_region, r, g, b, a, on_pre_show_popup=self.set_popup_active,
-                            on_hide_popup=self.set_popup_inactive)
-                        return
-                else:
-                    break
-            msg = 'QuickView not possible at current cursor position' if is_empty_selection else \
-                'QuickView not available for selection "{}"'.format(text)
-            window = self.view.window()
-            if window:
-                window.status_message(msg)
-
-    def set_popup_active(self, region: sublime.Region) -> None:
-        self._popup_active = True
-
-    def set_popup_inactive(self) -> None:
-        self._popup_active = False
-
-
 class QuickViewOpenImageCommand(sublime_plugin.WindowCommand):
-    def run(self, event: dict, href: str, name: str) -> None:
+    def run(self, event: dict, href: str, title: str) -> None:
         assert int(sublime.version()) >= 4096, 'This command only works on ST build 4096 or newer'
         flags = sublime.FORCE_GROUP
         if 'primary' in event['modifier_keys']:
             flags |= sublime.ADD_TO_SELECTION | sublime.SEMI_TRANSIENT
-        if href.startswith(FILE_PREFIX):
-            path = href[len(FILE_PREFIX):]
-            sublime.active_window().open_file(path, flags)
-        elif href.startswith(DATA_PREFIX):
+        if href.startswith('file://'):
+            path = href[len('file://'):]
+            self.window.open_file(path, flags)
+        elif href.startswith('data:'):
             contents = '<div style="text-align: center;"><img src="{}" /></div>'.format(href)
-            sublime.active_window().new_html_sheet(name, contents, flags)
+            self.window.new_html_sheet(title, contents, flags)
 
     def want_event(self) -> bool:
         return True
