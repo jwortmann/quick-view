@@ -3,7 +3,7 @@ from coloraide import Color
 from colorsys import rgb_to_hls
 from functools import lru_cache, partial
 from socket import timeout
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 from .lib import png
 import io
 import logging
@@ -111,7 +111,7 @@ POPUP_TEMPLATE = '''
 
 
 class ImageFormat:
-    UNSUPPORTED = 0
+    UNSUPPORTED = -1
     PNG = 1
     JPEG = 2
     GIF = 3
@@ -457,6 +457,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
 
     def run(self, edit: sublime.Edit, point: Optional[int] = None) -> None:
         manual = point is None
+        empty_selection = True
         if manual:
             if self._active_region:
                 self.view.hide_popup()
@@ -476,12 +477,12 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         elif self._active_region and self._active_region.contains(point):  # prevent flickering on small mouse movements
             return
         settings = sublime.load_settings(SETTINGS_FILE)
-        if manual or settings.get('image_preview'):
+        if manual and empty_selection or not manual and settings.get('image_preview'):
             if self.view.match_selector(point, settings.get('image_scope_selector')):
                 region = self.view.extract_scope(point)
                 self.image_preview(region, manual)
                 return
-        if manual or settings.get('color_preview'):
+        if manual and empty_selection or not manual and settings.get('color_preview'):
             if self.view.match_selector(point, SCOPE_SELECTOR_CSS_COLORNAME):
                 region = self.view.word(point)
                 self.color_preview_rgb(region)
@@ -574,19 +575,18 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             file_name = self.view.file_name()
             return os.path.abspath(os.path.join(os.path.dirname(file_name), full_path)) if file_name else ''
 
-    def popup_content(self, content: str, popup_width: int) -> str:
+    def popup_content(self, content: str, popup_width: int, popup_border_width: float) -> str:
         popup_style = sublime.load_settings(SETTINGS_FILE).get('popup_style')
         bubble = '<div class="preview-bubble bubble-above"></div>' if 'pointer' in popup_style else ''
         popup_border_radius = 0.3 if 'rounded' in popup_style else 0
         margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * self.view.em_width()
-        popup_border_width = 0.0725 * sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
         label_top_margin = 1 if int(sublime.version()) >= 4000 else 0
         popup_shadows = sublime.load_settings('Preferences.sublime-settings').get('popup_shadows', False)
         background = 'color(var(--background) lightness(- 1.2%))' if popup_shadows else 'var(--background)'
         return POPUP_TEMPLATE.format(
             background=background,
             margin=margin,
-            border=popup_border_width,
+            border=0.0725 * popup_border_width,
             border_radius=popup_border_radius,
             label_top_margin=label_top_margin,
             bubble=bubble,
@@ -619,11 +619,11 @@ class QuickViewCommand(sublime_plugin.TextCommand):
                 horizontal_correction = 1  # add padding between popup and left link boundary
         return self.view.layout_to_text((x, ay)) + horizontal_correction
 
-    def show_popup(self, region: sublime.Region, content: str) -> None:
+    def show_popup(self, region: sublime.Region, content: str, content_width: float, on_navigate: Optional[Callable] = None) -> None:
         popup_border_width = sublime.load_settings(SETTINGS_FILE).get('popup_border_width')
-        popup_width = int((40 + 2 * popup_border_width) * EM_SCALE_FACTOR * self.view.em_width())
+        popup_width = int(content_width + 2 * popup_border_width * EM_SCALE_FACTOR * self.view.em_width())
         location = self.popup_location(region, popup_width)
-        content = self.popup_content(content, popup_width)
+        content = self.popup_content(content, popup_width, popup_border_width)
         self.set_active_region(region)
         self.view.show_popup(
             content,
@@ -631,35 +631,27 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             location=location,
             max_width=1024,
             max_height=1024,
-            on_navigate=None,
+            on_navigate=on_navigate,
             on_hide=self.reset_active_region)
 
+    def show_color_popup(self, region: sublime.Region, content: str) -> None:
+        content_width = 40 * EM_SCALE_FACTOR * self.view.em_width()
+        self.show_popup(region, content, content_width)
+
     def show_image_popup(self, region: sublime.Region, width: int, height: int, src: str, title: str) -> None:
-        sublime_version = int(sublime.version())
+
         def on_navigate(href: str) -> None:
             sublime.active_window().open_file(href[len('file://'):])
-        device_scale_factor = EM_SCALE_FACTOR * self.view.em_width()
-        scaled_width, scaled_height = scale_image(width, height, device_scale_factor)
-        settings = sublime.load_settings(SETTINGS_FILE)
-        popup_border_width = settings.get('popup_border_width')
-        popup_width = scaled_width + int(2 * popup_border_width * device_scale_factor)
+
+        sublime_version = int(sublime.version())
+        scaled_width, scaled_height = scale_image(width, height, EM_SCALE_FACTOR * self.view.em_width())
         label = image_size_label(width, height)
-        if 'open_image_button' in settings.get('popup_style'):
+        if 'open_image_button' in sublime.load_settings(SETTINGS_FILE).get('popup_style'):
             if src.startswith('file://') or sublime_version >= 4096 and src.startswith('data:'):
                 href = sublime.command_url('quick_view_open_image', {'href': src, 'title': title}) if sublime_version >= 4096 else src
                 label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">❐</a>'.format(href)
         content = '<img src="{}" width="{}" height="{}" /><div class="img-label">{}</div>'.format(src, scaled_width, scaled_height, label)
-        location = self.popup_location(region, popup_width)
-        content = self.popup_content(content, popup_width)
-        self.set_active_region(region)
-        self.view.show_popup(
-            content,
-            flags=sublime.HIDE_ON_MOUSE_MOVE_AWAY,
-            location=location,
-            max_width=1024,
-            max_height=1024,
-            on_navigate=on_navigate if sublime_version < 4096 else None,
-            on_hide=self.reset_active_region)
+        self.show_popup(region, content, scaled_width, on_navigate if sublime_version < 4096 else None)
 
     def image_preview(self, region: sublime.Region, show_errors: bool = False) -> None:
         uri = self.view.substr(region)
@@ -674,19 +666,19 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             image_format = format_from_uri(uri)
             settings = sublime.load_settings(SETTINGS_FILE)
             if image_format in CONVERTABLE_IMAGE_FORMATS:
-                setting = CONVERTER_SETTING[image_format]
-                converters = {
+                valid_converters = {
                     ImageFormat.SVG: ('inkscape', 'magick'),
                     ImageFormat.WEBP: ('dwebp', 'magick'),
                     ImageFormat.AVIF: ('magick')
                 }[image_format]
-                if settings.get(setting) not in converters:
+                if settings.get(CONVERTER_SETTING[image_format]) not in valid_converters:
                     if show_errors:
                         self.view.window().status_message('No valid {} converter set in the package settings'.format(IMAGE_FORMAT_NAMES[image_format]))  # pyright: ignore[reportOptionalMemberAccess]
                     return
             if uri.lower().startswith(('http:', 'https:', 'ftp:')):
                 if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS or \
-                    (settings.get('extensionless_image_preview') and not uri.lower().endswith(IGNORED_FILE_EXTENSIONS)):
+                    not uri.lower().endswith(IGNORED_FILE_EXTENSIONS) and \
+                    (show_errors or settings.get('extensionless_image_preview')):
                     sublime.set_timeout_async(partial(self.internet_url_image_preview, region, uri, show_errors))
             elif uri.startswith('file://'):  # local absolute path
                 if image_format in NATIVE_IMAGE_FORMATS + CONVERTABLE_IMAGE_FORMATS:
@@ -703,38 +695,19 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             if show_errors:
                 self.view.window().status_message('Parsing error for data URI')  # pyright: ignore[reportOptionalMemberAccess]
             return
+        image_format = MIME_TYPE_FORMAT_MAP.get(mime, ImageFormat.UNSUPPORTED)
+        image_format_name = IMAGE_FORMAT_NAMES.get(image_format, 'unsupported format')
         if mime in (MimeType.PNG, MimeType.JPEG, MimeType.GIF, MimeType.BMP):
             pass
-        elif mime == MimeType.SVG:
-            converter = sublime.load_settings(SETTINGS_FILE).get('svg_converter')
+        elif mime in (MimeType.SVG, MimeType.WEBP, MimeType.AVIF):
+            setting = CONVERTER_SETTING[image_format]
+            converter = sublime.load_settings(SETTINGS_FILE).get(setting)
             try:
-                data = convert_bytes2png(data, ImageFormat.SVG, converter)
+                data = convert_bytes2png(data, image_format, converter)
             except Exception as ex:
                 logging.debug(ex)
                 if show_errors:
-                    self.view.window().status_message('Conversion error for SVG data URI')  # pyright: ignore[reportOptionalMemberAccess]
-                return
-            data_base64 = b64encode(data).decode('ascii')
-            data_uri = DATA_URI_TEMPLATE.format(MimeType.PNG, data_base64)
-        elif mime == MimeType.WEBP:
-            converter = sublime.load_settings(SETTINGS_FILE).get('webp_converter')
-            try:
-                data = convert_bytes2png(data, ImageFormat.WEBP, converter)
-            except Exception as ex:
-                logging.debug(ex)
-                if show_errors:
-                    self.view.window().status_message('Conversion error for WebP data URI')  # pyright: ignore[reportOptionalMemberAccess]
-                return
-            data_base64 = b64encode(data).decode('ascii')
-            data_uri = DATA_URI_TEMPLATE.format(MimeType.PNG, data_base64)
-        elif mime == MimeType.AVIF:
-            converter = sublime.load_settings(SETTINGS_FILE).get('avif_converter')
-            try:
-                data = convert_bytes2png(data, ImageFormat.AVIF, converter)
-            except Exception as ex:
-                logging.debug(ex)
-                if show_errors:
-                    self.view.window().status_message('Conversion error for AVIF data URI')  # pyright: ignore[reportOptionalMemberAccess]
+                    self.view.window().status_message('Conversion error for {} data URI'.format(image_format_name))  # pyright: ignore[reportOptionalMemberAccess]
                 return
             data_base64 = b64encode(data).decode('ascii')
             data_uri = DATA_URI_TEMPLATE.format(MimeType.PNG, data_base64)
@@ -743,7 +716,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
                 self.view.window().status_message('Mime type {} for data URI not supported'.format(mime))  # pyright: ignore[reportOptionalMemberAccess]
             return
         width, height = image_size(data)
-        title = 'data URI image ({})'.format(IMAGE_FORMAT_NAMES[MIME_TYPE_FORMAT_MAP[mime]])
+        title = 'data URI image ({})'.format(image_format_name)
         self.show_image_popup(region, width, height, data_uri, title)
 
     def internet_url_image_preview(self, region: sublime.Region, url: str, show_errors: bool = False) -> None:
@@ -762,7 +735,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             except Exception as ex:
                 logging.debug(ex)
                 if show_errors:
-                    self.view.window().status_message('Image conversion error for url {}'.format(url))  # pyright: ignore[reportOptionalMemberAccess]
+                    self.view.window().status_message('Image conversion error for URL {}'.format(url))  # pyright: ignore[reportOptionalMemberAccess]
                 return
         width, height = image_size(data)
         parsed = urllib.parse.urlparse(url)
@@ -799,7 +772,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
 
     def color_preview_rgb(self, region: sublime.Region) -> None:
         content = '<div class="color-swatch" style="background-color: {}"></div>'.format(self.view.substr(region))
-        self.show_popup(region, content)
+        self.show_color_popup(region, content)
 
     def color_preview_rgba(self, region: sublime.Region, color_tuple: Tuple[int, int, int, float]) -> None:
         r, g, b, a = color_tuple
@@ -824,7 +797,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
             data_base64 = checkerboard_png(r1, g1, b1, r2, g2, b2)
             scaled_width = int(40 * EM_SCALE_FACTOR * self.view.em_width())
             content = '<img src="data:image/png;base64,{}" width="{}" height="{}" />'.format(data_base64, scaled_width, scaled_width)
-        self.show_popup(region, content)
+        self.show_color_popup(region, content)
 
     def color_preview_css_variable(self, region: sublime.Region, definition_selector: str, show_errors: bool = False) -> None:
         variable_name = self.view.substr(region)
