@@ -2,6 +2,7 @@
     "*": {
         ">=3000": [
             "coloraide",
+            "requests",
             "typing"
         ]
     }

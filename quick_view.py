@@ -9,11 +9,12 @@ import io
 import logging
 import os
 import re
+import requests
 import struct
 import sublime
 import sublime_plugin
 import subprocess
-import urllib.parse, urllib.request
+import urllib.parse
 
 
 SETTINGS_FILE = 'QuickView.sublime-settings'
@@ -289,24 +290,22 @@ def image_size_label(width: int, height: int) -> str:
 @lru_cache(maxsize=16)
 def request_img(url: str) -> Tuple[Optional[str], Optional[bytes]]:
     try:
-        logging.debug('requesting image from %s', url)
-        with urllib.request.urlopen(url, timeout=2) as response:
-            length = response.headers.get('content-length')
-            if length is None:
-                raise ValueError('missing content-length header')
-            length = int(length)
-            if length == 0:
-                raise ValueError('empty payload')
-            mime = response.headers.get('content-type').lower()
-            if mime not in SUPPORTED_MIME_TYPES:
-                raise ValueError('mime type ' + mime + ' is not supported')
-            max_payload_size = sublime.load_settings(SETTINGS_FILE).get('max_payload_size', 8096)
-            if length > max_payload_size * 1024:
-                raise ValueError('refusing to download files larger than ' + str(max_payload_size) + 'kB')
-            data = response.read()
-            return mime, data
-    except timeout:
-        logging.debug('timeout for url %s', url)
+        headers = {'User-Agent': 'Sublime Text QuickView plugin'}
+        r = requests.get(url, headers=headers, timeout=2)
+        if not r.status_code == requests.codes.ok:
+            r.raise_for_status()
+        length = int(r.headers.get('content-length', 0))
+        if length == 0:
+            raise ValueError('empty payload')
+        mime = r.headers.get('content-type')
+        if mime is None or mime.lower() not in SUPPORTED_MIME_TYPES:
+            raise ValueError('mime type {} is not supported'.format(mime))
+        max_payload_size = sublime.load_settings(SETTINGS_FILE).get('max_payload_size', 8096)
+        if length > max_payload_size * 1024:
+            raise ValueError('refusing to download files larger than {}kB'.format(max_payload_size))
+        return mime, r.content
+    except requests.HTTPError as ex:
+        logging.debug(ex)
         return None, None
     except Exception as ex:
         logging.debug(ex)
