@@ -1,6 +1,11 @@
 QuickView Changelog
 ===================
 
+v1.4.4 (2023-05-18)
+-------------------
+
+  * Fixed image preview not working with URLs from some websites.
+
 v1.4.3 (2022-07-29)
 -------------------
 
