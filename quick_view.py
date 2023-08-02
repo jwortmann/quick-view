@@ -2,7 +2,6 @@ from base64 import b64encode, b64decode
 from coloraide import Color
 from colorsys import rgb_to_hls
 from functools import lru_cache, partial
-from socket import timeout
 from typing import Callable, Optional, Tuple
 from .lib import png
 import io
@@ -16,7 +15,11 @@ import sublime_plugin
 import subprocess
 import urllib.parse
 
+# To turn on debug logging:
+# Python 3.3>>> import logging
+# Python 3.3>>> logging.getLogger().setLevel(logging.DEBUG)
 
+ST_VERSION = int(sublime.version())
 SETTINGS_FILE = 'QuickView.sublime-settings'
 
 EM_SCALE_FACTOR = 1/8.4  # this means the following pixel values correspond to a layout with view.em_width() == 8.4
@@ -132,8 +135,28 @@ class MimeType:
     AVIF = 'image/avif'
 
 
-NATIVE_IMAGE_FORMATS = [ImageFormat.PNG, ImageFormat.JPEG, ImageFormat.GIF, ImageFormat.BMP]
-CONVERTABLE_IMAGE_FORMATS = [ImageFormat.SVG, ImageFormat.WEBP, ImageFormat.AVIF]
+NATIVE_IMAGE_FORMATS = [
+    ImageFormat.PNG,
+    ImageFormat.JPEG,
+    ImageFormat.GIF,
+    ImageFormat.BMP,
+    ImageFormat.WEBP
+] if ST_VERSION >= 4151 else [
+    ImageFormat.PNG,
+    ImageFormat.JPEG,
+    ImageFormat.GIF,
+    ImageFormat.BMP
+]
+
+CONVERTABLE_IMAGE_FORMATS = [
+    ImageFormat.SVG,
+    ImageFormat.AVIF
+] if ST_VERSION >= 4151 else [
+    ImageFormat.SVG,
+    ImageFormat.WEBP,
+    ImageFormat.AVIF
+]
+
 IGNORED_FILE_EXTENSIONS = ('.html', '.css', '.js', '.json', '.md', '.xml', '.mp3', '.ogv', '.mp4', '.mpeg', '.webm', '.zip', '.tgz')
 
 SUPPORTED_MIME_TYPES = [
@@ -394,7 +417,7 @@ def image_size(data) -> Tuple[int, int]:
     if isinstance(data, bytes):
         data = io.BytesIO(data)
     try:
-        head = data.read(26)
+        head = data.read(31)
         size = len(head)
         # JPEG
         if size >= 2 and head.startswith(b'\377\330'):
@@ -428,6 +451,19 @@ def image_size(data) -> Tuple[int, int]:
                 height = abs(height)
             else:
                 raise ValueError('unknown DIB header size: ' + str(headerSize))
+        # WebP
+        elif head.startswith(b'RIFF') and head[8:12] == b'WEBP':
+            if head[12:16] == b'VP8':
+                width, height = struct.unpack('<HH', head[26:30])
+            elif head[12:16] == b'VP8X':
+                width = struct.unpack('<I', head[24:27] + b'\0')[0] + 1
+                height = struct.unpack('<I', head[27:30] + b'\0')[0] + 1
+            elif head[12:16] == b'VP8L':
+                b = head[21:25]
+                width = (((b[1] & 63) << 8) | b[0]) + 1
+                height = (((b[3] & 15) << 10) | (b[2] << 2) | ((b[1] & 192) >> 6)) + 1
+            else:
+                raise ValueError('Unsupported WebP file')  # TODO add support for all WebP formats
     except Exception as ex:
         logging.debug(ex)
     return width, height
@@ -579,7 +615,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         bubble = '<div class="preview-bubble bubble-above"></div>' if 'pointer' in popup_style else ''
         popup_border_radius = 0.3 if 'rounded' in popup_style else 0
         margin = popup_width / 2 - 9 * EM_SCALE_FACTOR * self.view.em_width()
-        label_top_margin = 1 if int(sublime.version()) >= 4000 else 0
+        label_top_margin = 1 if ST_VERSION >= 4000 else 0
         popup_shadows = sublime.load_settings('Preferences.sublime-settings').get('popup_shadows', False)
         background = 'color(var(--background) lightness(- 1.2%))' if popup_shadows else 'var(--background)'
         return POPUP_TEMPLATE.format(
@@ -642,15 +678,14 @@ class QuickViewCommand(sublime_plugin.TextCommand):
         def on_navigate(href: str) -> None:
             sublime.active_window().open_file(href[len('file://'):])
 
-        sublime_version = int(sublime.version())
         scaled_width, scaled_height = scale_image(width, height, EM_SCALE_FACTOR * self.view.em_width())
         label = image_size_label(width, height)
         if 'open_image_button' in sublime.load_settings(SETTINGS_FILE).get('popup_style'):
-            if src.startswith('file://') or sublime_version >= 4096 and src.startswith('data:'):
-                href = sublime.command_url('quick_view_open_image', {'href': src, 'title': title}) if sublime_version >= 4096 else src
+            if src.startswith('file://') or ST_VERSION >= 4096 and src.startswith('data:'):
+                href = sublime.command_url('quick_view_open_image', {'href': src, 'title': title}) if ST_VERSION >= 4096 else src
                 label += '<span>&nbsp;&nbsp;&nbsp;</span><a class="icon" href="{}" title="Open Image in new Tab">❐</a>'.format(href)
         content = '<img src="{}" width="{}" height="{}" /><div class="img-label">{}</div>'.format(src, scaled_width, scaled_height, label)
-        self.show_popup(region, content, scaled_width, on_navigate if sublime_version < 4096 else None)
+        self.show_popup(region, content, scaled_width, on_navigate if ST_VERSION < 4096 else None)
 
     def image_preview(self, region: sublime.Region, show_errors: bool = False) -> None:
         uri = self.view.substr(region)
@@ -872,7 +907,7 @@ class QuickViewCommand(sublime_plugin.TextCommand):
 
 class QuickViewOpenImageCommand(sublime_plugin.WindowCommand):
     def run(self, event: dict, href: str, title: str) -> None:
-        assert int(sublime.version()) >= 4096, 'This command only works on ST build 4096 or newer'
+        assert ST_VERSION >= 4096, 'This command only works on ST build 4096 or newer'
         flags = sublime.FORCE_GROUP
         if 'primary' in event['modifier_keys']:
             flags |= sublime.ADD_TO_SELECTION | sublime.SEMI_TRANSIENT
