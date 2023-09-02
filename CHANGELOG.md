@@ -1,15 +1,24 @@
 QuickView Changelog
 ===================
 
+v1.4.5 (2023-09-02)
+-------------------
+
+  * Use native support for WebP images on Sublime Text built 4151 or newer,
+    instead of requiring an external converter for WebP image previews.
+
+
 v1.4.4 (2023-05-18)
 -------------------
 
   * Fixed image preview not working with URLs from some websites.
 
+
 v1.4.3 (2022-07-29)
 -------------------
 
   * Fixed compatibility with coloraide 1.0 dependency.
+
 
 v1.4.2 (2021-07-14)
 -------------------
@@ -17,6 +26,7 @@ v1.4.2 (2021-07-14)
   * Fixed a missing comma in settings schema.
 
   * Added changelog file.
+
 
 v1.4.1 (2021-07-07)
 -------------------
@@ -32,6 +42,7 @@ v1.4.1 (2021-07-07)
   * Slightly tweaked the popup background color for dark color schemes, so that
     it is almost indistinguishable from the popup shadow.
 
+
 v1.4.0 (2021-06-19)
 -------------------
 
@@ -40,6 +51,7 @@ v1.4.0 (2021-06-19)
     `"open_image_button"` value from the `"popup_style"` option.
 
   * A small tweak for the label top border for image previews on ST4.
+
 
 v1.3.0 (2021-05-27)
 -------------------
@@ -61,6 +73,7 @@ v1.3.0 (2021-05-27)
     to switch to the Sass package instead which seems to provide a better syntax
     for SCSS.
 
+
 v1.2.0 (2021-05-19)
 -------------------
 
@@ -76,6 +89,7 @@ v1.2.0 (2021-05-19)
 
   * A few small fixes and tweaks for color previews.
 
+
 v1.1.0 (2021-04-26)
 -------------------
 
@@ -84,6 +98,7 @@ v1.1.0 (2021-04-26)
     binding.
 
   * Added a setting for popup style configuration.
+
 
 v1.0.0 (2021-03-22)
 -------------------
