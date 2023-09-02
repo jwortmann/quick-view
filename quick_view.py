@@ -128,6 +128,7 @@ class ImageFormat:
 class MimeType:
     PNG = 'image/png'
     JPEG = 'image/jpeg'
+    JPG = 'image/jpg'
     GIF = 'image/gif'
     BMP = 'image/bmp'
     SVG = 'image/svg+xml'
@@ -162,6 +163,7 @@ IGNORED_FILE_EXTENSIONS = ('.html', '.css', '.js', '.json', '.md', '.xml', '.mp3
 SUPPORTED_MIME_TYPES = [
     MimeType.PNG,
     MimeType.JPEG,
+    MimeType.JPG,
     MimeType.GIF,
     MimeType.BMP,
     MimeType.SVG,
@@ -193,6 +195,7 @@ FILE_EXTENSION_FORMAT_MAP = {
 MIME_TYPE_FORMAT_MAP = {
     MimeType.PNG: ImageFormat.PNG,
     MimeType.JPEG: ImageFormat.JPEG,
+    MimeType.JPG: ImageFormat.JPEG,
     MimeType.GIF: ImageFormat.GIF,
     MimeType.BMP: ImageFormat.BMP,
     MimeType.SVG: ImageFormat.SVG,
@@ -317,15 +320,16 @@ def request_img(url: str) -> Tuple[Optional[str], Optional[bytes]]:
         r = requests.get(url, headers=headers, timeout=2)
         if not r.status_code == requests.codes.ok:
             r.raise_for_status()
-        length = int(r.headers.get('content-length', 0))
-        if length == 0:
-            raise ValueError('empty payload')
+        content_length = int(r.headers.get('content-length', 0))
+        # if content_length == 0:
+        #     raise ValueError('empty payload')
+        if content_length:
+            max_payload_size = sublime.load_settings(SETTINGS_FILE).get('max_payload_size', 8096)
+            if content_length > max_payload_size * 1024:
+                raise ValueError('refusing to download files larger than {}kB'.format(max_payload_size))
         mime = r.headers.get('content-type')
         if mime is None or mime.lower() not in SUPPORTED_MIME_TYPES:
             raise ValueError('mime type {} is not supported'.format(mime))
-        max_payload_size = sublime.load_settings(SETTINGS_FILE).get('max_payload_size', 8096)
-        if length > max_payload_size * 1024:
-            raise ValueError('refusing to download files larger than {}kB'.format(max_payload_size))
         return mime, r.content
     except requests.HTTPError as ex:
         logging.debug(ex)
