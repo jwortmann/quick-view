@@ -453,7 +453,7 @@ def image_size(data) -> Tuple[int, int]:
                 raise ValueError('unknown DIB header size: ' + str(headerSize))
         # WebP
         elif head.startswith(b'RIFF') and head[8:12] == b'WEBP':
-            if head[12:16] == b'VP8':
+            if head[12:16] == b'VP8 ':
                 width, height = struct.unpack('<HH', head[26:30])
             elif head[12:16] == b'VP8X':
                 width = struct.unpack('<I', head[24:27] + b'\0')[0] + 1
