@@ -46,8 +46,9 @@
     // Image converter program for the WebP file format. Supported options are:
     //  - "dwebp" (precompiled WebP decoder from https://developers.google.com/speed/webp/docs/precompiled)
     //  - "magick" (ImageMagick)
-    // Note: this setting is obsolete in Sublime Text build 4151 or newer due to
-    //       native WebP support.
+    // Note: Sublime Text build 4151 or newer supports the WebP image format natively,
+    //       so on a current Sublime Text version the converter isn't needed anymore
+    //       and it won't be used even if set. In other words, this setting is obsolete.
     "webp_converter": "",
 
     // The border width of the popups. This does not necessarily correspond with
