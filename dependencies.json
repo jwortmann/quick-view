@@ -1,9 +1,16 @@
 {
     "*": {
-        ">=3000": [
+        "3000 - 3999": [
             "coloraide",
             "requests",
             "typing"
+        ],
+        ">=4000": [
+            "chardet",
+            "coloraide",
+            "idna",
+            "requests",
+            "urllib3"
         ]
     }
 }
