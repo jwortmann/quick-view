@@ -1,6 +1,12 @@
 QuickView Changelog
 ===================
 
+v1.4.6 (2025-11-02)
+-------------------
+
+  * Run on Python 3.8 plugin host on ST4 and fixed compatibility with dependencies.
+
+
 v1.4.5 (2023-09-02)
 -------------------
 
